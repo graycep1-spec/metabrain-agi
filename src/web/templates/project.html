@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% block title %}{{ p.name }} — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <p><a href="/projects">← К проектам</a></p>
+  <h1>{{ p.name }} <span class="tag">{{ p.status }}</span></h1>
+  {% if p.goal %}<p>{{ p.goal }}</p>{% endif %}
+  <p class="muted">
+    {% if p.starts_on or p.ends_on %}{{ p.starts_on or "…" }} → {{ p.ends_on or "…" }} · {% endif %}
+    Бюджет: {{ "%.2f"|format(p.budget_usd) }}
+  </p>
+  {% if p.result %}<p><strong>Результат:</strong> {{ p.result }}</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Прикрепить сотрудника</h2>
+  {% if employees %}
+  <form method="post" action="/projects/{{ p.project_id }}/assign">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="employee_id">Сотрудник</label>
+    <select id="employee_id" name="employee_id" required>
+      {% for e in employees %}<option value="{{ e.employee_id }}">{{ e.title }} · {{ e.status }}</option>{% endfor %}
+    </select>
+    <label for="role">Роль в проекте</label>
+    <input id="role" name="role" type="text" maxlength="200" placeholder="Например: владелец">
+    <div class="actions"><button class="button" type="submit">Прикрепить</button></div>
+  </form>
+  {% else %}
+  <p class="muted">Сотрудников пока нет. <a href="/">Создайте роль на главной</a>.</p>
+  {% endif %}
+</div>
+
+{% for a in p.assignments %}
+<div class="card">
+  <h2>{{ a.employee_title }} <span class="tag">{{ a.role or "без роли" }}</span></h2>
+  <p class="muted">Статус сотрудника: {{ a.employee_status }}</p>
+  {% if a.tasks %}
+  <table>
+    <thead><tr><th>Задача</th><th>Статус</th><th></th></tr></thead>
+    <tbody>
+    {% for t in a.tasks %}
+      <tr>
+        <td>{{ t.title }}{% if t.description %}<br><span class="muted">{{ t.description }}</span>{% endif %}</td>
+        <td>{{ t.status }}</td>
+        <td>
+          <form method="post" action="/tasks/{{ t.task_id }}/status" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="next" value="/projects/{{ p.project_id }}">
+            <select name="status" aria-label="Новый статус">
+              {% for value, label in {"todo":"К выполнению","doing":"В работе","done":"Готово","blocked":"Заблокировано"}.items() %}
+              <option value="{{ value }}" {% if value == t.status %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <button class="button secondary" type="submit">Сохранить</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Задач пока нет.</p>{% endif %}
+  <form method="post" action="/projects/{{ p.project_id }}/tasks">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="assignment_id" value="{{ a.assignment_id }}">
+    <label for="title-{{ a.assignment_id }}">Новая задача</label>
+    <input id="title-{{ a.assignment_id }}" name="title" type="text" maxlength="300" required placeholder="Что сделать">
+    <label for="description-{{ a.assignment_id }}">Описание</label>
+    <textarea id="description-{{ a.assignment_id }}" name="description" maxlength="2000"></textarea>
+    <div class="actions"><button class="button" type="submit">Добавить задачу</button></div>
+  </form>
+</div>
+{% else %}
+<div class="card"><p class="muted">К проекту пока никто не прикреплён.</p></div>
+{% endfor %}
+{% endblock %}

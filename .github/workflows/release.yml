@@ -1,0 +1,81 @@
+name: Release
+
+# По тегу vX.Y.Z: собрать архивы установки, посчитать SHA-256, собрать страницу лендинга с загрузчиками
+# и выложить всё на GitHub Pages; архивы дополнительно приложить к GitHub Release.
+# Требует в настройках репозитория: Pages → Source = GitHub Actions.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write      # для создания Release
+  pages: write         # для публикации Pages
+  id-token: write      # для деплоя Pages
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Собрать адрес Pages и версию
+        id: meta
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr 'A-Z' 'a-z')
+          repo=$(echo "${{ github.event.repository.name }}")
+          echo "base=https://${owner}.github.io/${repo}" >> "$GITHUB_OUTPUT"
+          echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Собрать архивы установки
+        env:
+          BASE: ${{ steps.meta.outputs.base }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          mkdir -p site
+          # git archive берёт только закоммиченные файлы — секретов (.env) в архив не попадает
+          git archive --format=tar.gz --prefix="metabrain-${VERSION}/" -o "site/metabrain-${VERSION}.tar.gz" HEAD
+          git archive --format=zip    --prefix="metabrain-${VERSION}/" -o "site/metabrain-${VERSION}.zip" HEAD
+          # загрузчики с подставленным адресом дистрибутивов
+          sed "s#__METABRAIN_BASE__#${BASE}#g" get.sh  > site/get.sh
+          sed "s#__METABRAIN_BASE__#${BASE}#g" get.ps1 > site/get.ps1
+          # страница: заменить плейсхолдеры на реальные адреса (в репозитории они остаются плейсхолдерами)
+          sed -e "s#&lt;страница&gt;#${BASE#https://}#g" \
+              -e "s#&lt;репозиторий&gt;#${{ github.server_url }}/${{ github.repository }}.git#g" \
+              docs/index.html > site/index.html
+          echo "${VERSION}" > site/latest.txt
+          ( cd site && sha256sum metabrain-*.tar.gz metabrain-*.zip > SHA256SUMS )
+          cat site/SHA256SUMS
+
+      - name: Проверить, что архив ставится из собственной контрольной суммы
+        working-directory: site
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          sha256sum -c SHA256SUMS
+          tar -tzf "metabrain-${VERSION}.tar.gz" | grep -q "metabrain-${VERSION}/install.sh"
+          # в архиве не должно быть секретов
+          ! tar -tzf "metabrain-${VERSION}.tar.gz" | grep -E "/\.env$|deploy/.*\.env$" || (echo "SECRET IN ARCHIVE" && exit 1)
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          gh release create "${VERSION}" \
+            "site/metabrain-${VERSION}.tar.gz" "site/metabrain-${VERSION}.zip" "site/SHA256SUMS" \
+            --title "MetaBrain ${VERSION}" --generate-notes
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

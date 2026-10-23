@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Сотрудники — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Сотрудники по ролям</h1>
+  <form method="get" action="/" class="actions">
+    <select name="role" aria-label="Роль">
+      <option value="">Все роли</option>
+      {% for r in roles %}<option value="{{ r }}" {% if r == role %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+    <select name="status" aria-label="Статус">
+      <option value="">Любой статус</option>
+      {% for value, label in statuses.items() %}<option value="{{ value }}" {% if value == sel_status %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <button class="button secondary" type="submit">Показать</button>
+    {% if role or sel_status %}<a class="button secondary" href="/">Сбросить</a>{% endif %}
+  </form>
+</div>
+{% if planning %}
+<div class="card">
+  <h2>Планирование</h2>
+  <p class="muted">Процессы: {{ planning.processes }} · Проекты: {{ planning.projects }} · Назначения: {{ planning.assignments }} · Задачи: {{ planning.tasks }}</p>
+  <div class="actions">
+    <a class="button secondary" href="/processes">Процессы</a>
+    <a class="button secondary" href="/projects">Проекты</a>
+  </div>
+</div>
+{% endif %}
+<div class="card">
+  <h2>Создать роль</h2>
+  <p class="muted">Опишите роль — модель соберёт паспорт, а вы подтвердите его в «Предложениях». После этого сотрудника можно прикрепить к процессу или проекту.</p>
+  <form method="post" action="/roles">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="role_text">Роль</label>
+    <textarea id="role_text" name="role_text" maxlength="2000" required placeholder="Например: менеджер по продажам, готовлю КП по новым заявкам и сверяю склад"></textarea>
+    <div class="actions"><button class="button" type="submit">Создать черновик</button></div>
+  </form>
+</div>
+<div class="card">
+  <h2>Пригласить коллегу</h2>
+  <p class="muted">Создайте код приглашения и передайте его коллеге. Он войдёт через Telegram и присоединится к вашей организации — в своём отдельном пространстве. Код действует 7 дней.</p>
+  <form method="post" action="/invite">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="actions"><button class="button secondary" type="submit">Создать код приглашения</button></div>
+  </form>
+</div>
+{% for g in groups %}
+<div class="card">
+  <h2>{{ g.role }} <span class="tag">{{ kinds.get(g.kind, g.kind) }}</span> <span class="muted">· {{ g.employees | length }}</span></h2>
+  <table>
+    <thead><tr><th>Сотрудник</th><th>Статус</th><th>Автономия</th><th></th></tr></thead>
+    <tbody>
+    {% for e in g.employees %}
+      <tr>
+        <td>{% if e.kind != "researcher" %}<a href="/employees/{{ e.employee_id }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}</td>
+        <td>{{ statuses.get(e.status, e.status) }}</td>
+        <td>{{ e.autonomy }}</td>
+        <td>
+          {% if e.kind != "researcher" and e.status in ("active", "paused") %}
+          <form method="post" action="/employees/{{ e.employee_id }}/{{ 'resume' if e.status == 'paused' else 'pause' }}" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="button secondary" type="submit">{{ "Возобновить" if e.status == "paused" else "Пауза" }}</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><p class="muted">
+  {% if role or sel_status %}По фильтру никого. <a href="/">Сбросить фильтр</a>.{% else %}Пока никого. Опишите свою роль боту командой <code>/role</code>.{% endif %}
+</p></div>
+{% endfor %}
+{% endblock %}

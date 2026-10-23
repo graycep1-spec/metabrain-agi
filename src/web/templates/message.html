@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>{{ title }}</h1>
+  <p>{{ text }}</p>
+  {% if link %}<p><a class="button" href="{{ link.href }}">{{ link.label }}</a></p>{% endif %}
+</div>
+{% endblock %}

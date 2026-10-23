@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{{ e.title }} — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ e.title }}</h1>
+  <p><span class="tag">{{ kinds.get(e.kind, e.kind) }}</span>
+     <span class="tag">{{ statuses.get(e.status, e.status) }}</span>
+     {% if e.active_version %}<span class="tag">действует версия {{ e.active_version }}</span>{% endif %}</p>
+  {% if p %}
+    {% if e.shown_version != e.active_version %}<p class="muted">Показан черновик версии {{ e.shown_version }} — ещё не действует.</p>{% endif %}
+    <p>{{ p.role.mission }}</p>
+    <h2>Обязанности</h2>
+    <ol>{% for d in p.duties %}<li>{{ d.text }}</li>{% endfor %}</ol>
+    <h2>Цели</h2>
+    {% if p.goals %}<ul>{% for g in p.goals %}<li>{{ g.text }} — {{ g.metric }}: {{ g.target if g.target is not none else "—" }} за {{ g.period }}</li>{% endfor %}</ul>
+    {% else %}<p class="muted">Не заданы.</p>{% endif %}
+    <h2>Границы решений</h2>
+    <p><b>Может:</b> {{ p.decision_bounds.may | join("; ") or "—" }}</p>
+    <p><b>Нельзя:</b> {{ p.decision_bounds.must_not | join("; ") or "—" }}</p>
+    <h2>Когда спрашивает куратора</h2>
+    <ul>{% for x in p.escalation %}<li>{{ x.condition }}</li>{% else %}<li class="muted">—</li>{% endfor %}</ul>
+    <h2>Расписание (UTC)</h2>
+    <ul>{% for s in p.triggers.schedule %}<li><code>{{ s.cron }}</code> — обязанность {{ s.duty_id[1:] }}</li>{% endfor %}</ul>
+    <h2>Доступ к системам</h2>
+    <p>{{ p.tools.connectors | join(", ") or "Пока нет подключённых систем" }}{% if p.tools.read_scopes %} · чтение: {{ p.tools.read_scopes | join(", ") }}{% endif %}</p>
+    {% if not e.active_version and e.kind != "researcher" %}
+    <div class="actions"><a class="button" href="/employees/{{ e.employee_id }}/edit">Изменить черновик</a>
+      <a class="button secondary" href="/proposals">Подтвердить в «Предложениях»</a></div>
+    {% endif %}
+    {% if e.active_version %}
+    <div class="actions">
+      <a class="button" href="/employees/{{ e.employee_id }}/edit">Изменить паспорт</a>
+      {% if e.kind != "researcher" %}
+      <form method="post" action="/employees/{{ e.employee_id }}/{{ 'resume' if e.status == 'paused' else 'pause' }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="button secondary" type="submit">{{ "Возобновить" if e.status == "paused" else "Поставить на паузу" }}</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% endif %}
+</div>
+{% if autonomy and e.kind != "researcher" %}
+<div class="card">
+  <h2>Автономия</h2>
+  {% if autonomy.classes %}
+  <table>
+    <thead><tr><th>Класс действий</th><th>Уровень</th><th>Решено / принято</th><th>До следующего уровня</th></tr></thead>
+    <tbody>
+    {% for c in autonomy.classes %}
+      <tr><td>{{ c.action_class }}</td><td>{{ c.level }}</td>
+          <td>{{ c.metrics.decided }} / {{ c.metrics.accepted }}</td>
+          <td>{% if c.eligible_for %}можно просить {{ c.eligible_for }}{% elif c.unmet %}не хватает: {% for u in c.unmet %}{{ metric_names.get(u, u) }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>Уровень L0: сотрудник только рекомендует, каждое решение — ваше. Подключения пока только на чтение, действий с записью нет.</p>
+  {% endif %}
+  {% set r = autonomy.recommendations %}
+  <p class="muted">Рекомендации: решено {{ r.decided }}, принято {{ r.accepted }}{% if r.accepted_ratio is not none %} ({{ (r.accepted_ratio * 100) | round | int }}%){% endif %}.
+    Порог для L1: {{ autonomy.l1_thresholds.min_decided }} решений и не меньше {{ (autonomy.l1_thresholds.accepted_ratio * 100) | round | int }}% принятых{% if not autonomy.l1_unmet %} — выполнен{% endif %}.</p>
+</div>
+{% endif %}
+<div class="card">
+  <h2>Версии паспорта</h2>
+  <table>
+    <thead><tr><th>Версия</th><th>Статус</th><th>Создана</th></tr></thead>
+    <tbody>
+    {% for v in e.versions %}
+      <tr><td>{{ v.version }}</td><td>{{ version_statuses.get(v.status, v.status) }}{% if v.status == "proposed" %} · <a href="/proposals">решить</a>{% endif %}</td><td>{{ v.created_at[:16] | replace("T", " ") }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Подключения — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Подключения</h1>
+  {% if systems %}
+  <table>
+    <thead><tr><th>Система</th><th>Состояние</th><th>Подключена (UTC)</th></tr></thead>
+    <tbody>
+    {% for s in systems %}
+      <tr><td>{{ s.system }}</td>
+          <td>{{ system_statuses.get(s.status, s.status) }}{% if s.status == "pending" %} · <a href="/proposals">решить</a>{% endif %}</td>
+          <td>{{ s.connected_at[:16] | replace("T", " ") if s.connected_at else "—" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">Реестр систем не настроен — подключать нечего.</p>
+  {% endif %}
+</div>
+{% if connectable %}
+<div class="card">
+  <h2>Подключить систему</h2>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/connections">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if connect_request_id %}
+    <input type="hidden" name="connect_request_id" value="{{ connect_request_id }}">
+    <p class="muted">Подключение начато в Telegram — осталось ввести доступ.</p>
+    {% endif %}
+    <label for="system">Система</label>
+    <select id="system" name="system">
+      {% for s in connectable %}<option value="{{ s }}" {% if s == selected %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select>
+    <label for="secret">Доступ (токен)</label>
+    <input type="password" id="secret" name="secret" autocomplete="off" required>
+    <p class="muted">Доступ уходит в зашифрованное хранилище харнесса; ни кабинет, ни бот его больше не покажут.
+      Подключение начнётся только после вашего подтверждения в «Предложениях».</p>
+    <div class="actions"><button class="button" type="submit">Сохранить доступ и предложить подключение</button></div>
+  </form>
+</div>
+{% endif %}
+<div class="card">
+  <h2>Карта ландшафта</h2>
+  {% for system, item in landscape.items() %}
+    <h3>{{ system }}</h3>
+    <ul>
+    {% for o in item.objects %}
+      <li><b>{{ o.name }}</b>{% if o.count is defined %} — {{ o.count }} шт.{% endif %}
+        {% if o.fields %}<br><span class="muted">поля: {{ o.fields | join(", ") }}</span>{% endif %}
+        {% for l in o.links or [] %}<br><span class="muted">связь: {{ l.field }} → {{ l.to }}</span>{% endfor %}</li>
+    {% endfor %}
+    </ul>
+    {% if item.discovered_at %}<p class="muted">Исследовано: {{ item.discovered_at[:16] | replace("T", " ") }} UTC</p>{% endif %}
+  {% else %}
+    <p class="muted">Карта появится, когда Исследователь пройдёт по подключённой системе.</p>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,139 @@
+# Продовая установка MetaBrain — ставится и обновляется install.sh (Linux) / install.ps1 (Windows).
+# Проект `metabrain`: своя сеть, свой том, свой Postgres — можно ставить рядом с другими сервисами.
+# Наружу публикуется только кабинет на WEB_BIND:WEB_PORT (по умолчанию 127.0.0.1:8081; HTTPS — через
+# reverse proxy). Qdrant и NATS код пока не использует (OPEN-14, T-16). Секреты — в deploy/.env (не в git).
+
+name: metabrain
+
+x-app: &app
+  image: metabrain/app:local
+  pull_policy: never
+  restart: unless-stopped
+  mem_limit: 256m
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+    interval: 30s
+    timeout: 3s
+    retries: 5
+
+services:
+  postgres:
+    image: postgres:16          # тот же образ, что у TSN: место на диске не тратится
+    restart: unless-stopped
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    environment:
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?}"
+      HARNESS_DB_PASSWORD: "${HARNESS_DB_PASSWORD:?}"
+      METABRAIN_DB_PASSWORD: "${METABRAIN_DB_PASSWORD:?}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  validator:
+    <<: *app
+    build: {context: .., dockerfile: Dockerfile.stub}
+    command: ["python", "-m", "src.validator.app"]
+    environment:
+      SERVICE_NAME: validator
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      VALIDATOR_SIGNING_KEY: "${VALIDATOR_SIGNING_KEY:?}"
+      VALIDATOR_PROFILE_SET: "${VALIDATOR_PROFILE_SET:-demo-v1}"
+
+  metabrain:
+    <<: *app
+    command: ["python", "-m", "src.metabrain.app"]
+    environment:
+      SERVICE_NAME: metabrain
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      METABRAIN_DATABASE_URL: "postgresql://metabrain:${METABRAIN_DB_PASSWORD}@postgres:5432/postgres"
+      VALIDATOR_URL: "http://validator:8080"
+      CONSENT_PUBLIC_KEY: "${CONSENT_PUBLIC_KEY:?}"
+    depends_on:
+      postgres: {condition: service_healthy}
+      validator: {condition: service_started}
+
+  metabrain-mcp:
+    # Внешняя поверхность мета-мозга (C-5, ADR-022). Наружу не публикуется:
+    # доступ — SSH-туннель или отдельный HTTPS-путь по решению (STATE, «Отложено»).
+    <<: *app
+    command: ["python", "-m", "src.metabrain.mcp"]
+    environment:
+      SERVICE_NAME: metabrain-mcp
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      METABRAIN_DATABASE_URL: "postgresql://metabrain:${METABRAIN_DB_PASSWORD}@postgres:5432/postgres"
+      VALIDATOR_URL: "http://validator:8080"
+      MCP_CLIENTS: "${MCP_CLIENTS:-}"
+      MCP_ALLOWED_ORIGINS: "${MCP_ALLOWED_ORIGINS:-}"
+    depends_on:
+      postgres: {condition: service_healthy}
+      metabrain: {condition: service_started}
+
+  demo-landscape:
+    <<: *app
+    command: ["python", "-m", "src.demo_landscape.app"]
+    environment:
+      SERVICE_NAME: demo-landscape
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      DEMO_LANDSCAPE_TOKENS: "${DEMO_LANDSCAPE_TOKENS:?}"
+
+  harness:
+    <<: *app
+    mem_limit: 384m
+    command: ["python", "-m", "src.harness.app"]
+    environment:
+      SERVICE_NAME: harness
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      HARNESS_DATABASE_URL: "postgresql://harness:${HARNESS_DB_PASSWORD}@postgres:5432/postgres"
+      HARNESS_API_TOKEN: "${HARNESS_API_TOKEN:?}"
+      APP_BASE_URL: "${WEB_BASE_URL:-http://localhost:8081}"
+      WEB_BASE_URL: "${WEB_BASE_URL:-http://localhost:8081}"
+      # Отдельный бот MetaBrain. Токен TSN-бота сюда не ставить: харнесс всё равно откажется опрашивать
+      # бота с вебхуком, но и пробовать незачем.
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      TELEGRAM_BOT_USERNAME: "${TELEGRAM_BOT_USERNAME:-metabrain_bot}"
+      TELEGRAM_API_BASE_URL: "http://127.0.0.1:8080"
+      TELEGRAM_OIDC_CLIENT_ID: "${TELEGRAM_OIDC_CLIENT_ID:-}"
+      TELEGRAM_OIDC_CLIENT_SECRET: "${TELEGRAM_OIDC_CLIENT_SECRET:-}"
+      LLM_PROVIDER: deepseek
+      DEEPSEEK_API_BASE: "${DEEPSEEK_API_BASE:-https://api.deepseek.com}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      DLP_ENABLED: "true"
+      CONSENT_SIGNING_KEY: "${CONSENT_SIGNING_KEY:?}"
+      CONSENT_PUBLIC_KEY: "${CONSENT_PUBLIC_KEY:?}"
+      CONSENT_TOKEN_TTL_SECONDS: "${CONSENT_TOKEN_TTL_SECONDS:-900}"
+      SECRET_STORE_KEY: "${SECRET_STORE_KEY:?}"
+      VALIDATOR_URL: "http://validator:8080"
+      METABRAIN_URL: "http://metabrain:8080"
+      LANDSCAPE_SYSTEMS: '{"crm": {"base_url": "http://demo-landscape:8080/crm", "test_data_ref": "demo-landscape:fixture-v1"}, "stock": {"base_url": "http://demo-landscape:8080/stock", "test_data_ref": "demo-landscape:fixture-v1"}, "pricing": {"base_url": "http://demo-landscape:8080/pricing", "test_data_ref": "demo-landscape:fixture-v1"}}'
+    depends_on:
+      postgres: {condition: service_healthy}
+      validator: {condition: service_started}
+      metabrain: {condition: service_started}
+      demo-landscape: {condition: service_started}
+
+  web:
+    <<: *app
+    command: ["python", "-m", "src.web.app"]
+    environment:
+      SERVICE_NAME: web
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      HARNESS_API_URL: "http://harness:8080"
+      HARNESS_API_TOKEN: "${HARNESS_API_TOKEN:?}"
+      WEB_BASE_URL: "${WEB_BASE_URL:-http://localhost:8081}"
+      TELEGRAM_BOT_USERNAME: "${TELEGRAM_BOT_USERNAME:-metabrain_bot}"
+    ports: ["${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8081}:8080"]   # наружу — через reverse proxy с HTTPS
+    depends_on: [harness]
+
+volumes:
+  pgdata:

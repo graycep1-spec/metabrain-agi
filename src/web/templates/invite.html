@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Код приглашения — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Приглашение создано</h1>
+  <p class="muted">Код действует 7 дней. Передайте коллеге любой из вариантов.</p>
+
+  <h3>Код приглашения</h3>
+  <pre>{{ code }}</pre>
+  <p class="muted">Коллега входит в кабинет через Telegram и на экране входа выбирает «Присоединиться по приглашению», вставляя этот код.</p>
+
+  {% if link %}
+  <h3>Ссылка на бота</h3>
+  <pre>{{ link }}</pre>
+  <p class="muted">Или коллега открывает эту ссылку в Telegram — бот присоединит его к организации.</p>
+  {% endif %}
+
+  <div class="actions">
+    <a class="button" href="/">Готово</a>
+    <form method="post" action="/invite" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button secondary" type="submit">Создать ещё один код</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

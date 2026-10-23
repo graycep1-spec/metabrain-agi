@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Предложения — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Ждут вашего решения</h1>
+  {% if not pending %}<p class="muted">Сейчас ничего не ждёт решения.</p>{% endif %}
+</div>
+{% for p in pending %}
+<div class="card">
+  <h2>{{ p.summary }}</h2>
+  <p><span class="tag">{{ kinds.get(p.kind, p.kind) }}</span> <span class="muted">{{ p.created_at[:16] | replace("T", " ") }}</span></p>
+  {% set s = p.payload %}
+  {% if p.kind == "passport" %}
+    {% if s.diff %}
+      <p><b>Что меняется (версия {{ s.previous_version }} → {{ s.version }}):</b></p>
+      <ul>
+      {% for d in s.diff %}
+        <li>{{ fields.get(d.field, d.field) }}:
+          {% if d.added is defined %}
+            {% for x in d.added %}<span class="added">+ {{ x }}</span>{% if not loop.last %}; {% endif %}{% endfor %}
+            {% if d.added and d.removed %}; {% endif %}
+            {% for x in d.removed %}<span class="removed">{{ x }}</span>{% if not loop.last %}; {% endif %}{% endfor %}
+          {% else %}<span class="removed">{{ d.before }}</span> → <span class="added">{{ d.after }}</span>{% endif %}
+        </li>
+      {% endfor %}
+      </ul>
+    {% else %}
+      <p><b>{{ s.passport.role.title }}</b> — {{ s.passport.role.mission }}</p>
+      <p>Обязанности: {{ s.passport.duties | map(attribute="text") | join("; ") }}</p>
+      <p>Расписание: {% for t in s.passport.triggers.schedule %}<code>{{ t.cron }}</code>{% if not loop.last %}, {% endif %}{% endfor %} ·
+         Автономия: L0 (только рекомендации)</p>
+      {% if s.passport.escalation %}<p>Спросит вас: {{ s.passport.escalation | map(attribute="condition") | join("; ") }}</p>{% endif %}
+    {% endif %}
+  {% elif p.kind == "adapter" %}
+    <p>Система <b>{{ s.system }}</b>, только чтение: {{ s.manifest.read_scopes | join(", ") }}. Запись: {{ "нет" if not s.manifest.writes else s.manifest.writes | map(attribute="action_class") | join(", ") }}.</p>
+    <p class="muted">Адаптер проверен валидатором (проверка {{ p.score_ref }}).</p>
+  {% elif p.kind == "connect" %}
+    <p>Подключить систему <b>{{ s.system }}</b>. Доступ хранится в хранилище секретов, сотрудники его не видят.</p>
+  {% else %}
+    {% if p.sources %}<p class="muted">Источники: {% for src in p.sources %}{{ src.system }} {{ src.object_ref }}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+  {% endif %}
+  <form method="post" action="/proposals/{{ p.proposal_id }}/decide" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button" type="submit" name="decision" value="approve">Подтвердить</button>
+    <button class="button secondary" type="submit" name="decision" value="return">Вернуть</button>
+    {% if p.kind == "action" %}<button class="button secondary" type="submit" name="decision" value="incident">Инцидент</button>{% endif %}
+  </form>
+</div>
+{% endfor %}
+{% if decided %}
+<div class="card">
+  <h2>Недавние решения</h2>
+  <table>
+    <thead><tr><th>Предложение</th><th>Решение</th></tr></thead>
+    <tbody>{% for p in decided %}<tr><td>{{ p.summary }}</td><td>{{ decisions.get(p.status, p.status) }}</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

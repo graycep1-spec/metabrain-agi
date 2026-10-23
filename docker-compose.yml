@@ -1,0 +1,165 @@
+x-service-stub: &service-stub
+  build:
+    context: .
+    dockerfile: Dockerfile.stub
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2)"]
+    interval: 10s
+    timeout: 3s
+    retries: 5
+
+services:
+  harness:
+    <<: *service-stub
+    image: metabrain/harness:local
+    command: ["python", "-m", "src.harness.app"]
+    environment:
+      SERVICE_NAME: harness
+      HARNESS_DATABASE_URL: "postgresql://harness:${HARNESS_DB_PASSWORD:?Set HARNESS_DB_PASSWORD in .env}@postgres:5432/postgres"
+      HARNESS_API_TOKEN: "${HARNESS_API_TOKEN:?Set HARNESS_API_TOKEN in .env}"
+      TELEGRAM_BOT_USERNAME: "${TELEGRAM_BOT_USERNAME:-metabrain_bot}"
+      TELEGRAM_API_BASE_URL: "http://127.0.0.1:8080"
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      LLM_PROVIDER: "${LLM_PROVIDER:-deepseek}"
+      DEEPSEEK_API_BASE: "${DEEPSEEK_API_BASE:-https://api.deepseek.com}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+      LOCAL_LLM_API_BASE: "${LOCAL_LLM_API_BASE:-http://vllm:8000/v1}"
+      LOCAL_LLM_API_KEY: "${LOCAL_LLM_API_KEY:-}"
+      LLM_MODEL_MAIN: "${LLM_MODEL_MAIN:-deepseek-flash}"
+      LLM_MODEL_JUDGE: "${LLM_MODEL_JUDGE:-deepseek-v4-pro}"
+      DLP_ENABLED: "${DLP_ENABLED:-true}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      CONSENT_SIGNING_KEY: "${CONSENT_SIGNING_KEY:-}"
+      CONSENT_PUBLIC_KEY: "${CONSENT_PUBLIC_KEY:-}"
+      CONSENT_TOKEN_TTL_SECONDS: "${CONSENT_TOKEN_TTL_SECONDS:-900}"
+      # T-34 (ADR-028): ключ хранилища доступов, введённых в кабинете (32 байта, base64)
+      SECRET_STORE_KEY: "${SECRET_STORE_KEY:-}"
+      QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
+      NATS_URL: "${NATS_URL:-nats://nats:4222}"
+      # T-13/T-19 (ADR-023, ADR-024): валидатор, реестр систем, токены демо-ландшафта для secret_ref подключений
+      VALIDATOR_URL: "http://validator:8080"
+      # T-23 (ADR-027): навыки — внутренний HTTP мета-мозга
+      METABRAIN_URL: "http://metabrain:8080"
+      LANDSCAPE_SYSTEMS: '{"crm": {"base_url": "http://demo-landscape:8080/crm", "test_data_ref": "demo-landscape:fixture-v1"}, "stock": {"base_url": "http://demo-landscape:8080/stock", "test_data_ref": "demo-landscape:fixture-v1"}, "pricing": {"base_url": "http://demo-landscape:8080/pricing", "test_data_ref": "demo-landscape:fixture-v1"}}'
+      DEMO_LANDSCAPE_TOKEN_A: "${DEMO_LANDSCAPE_TOKEN_A:-}"
+      DEMO_LANDSCAPE_TOKEN_B: "${DEMO_LANDSCAPE_TOKEN_B:-}"
+      # T-31 (ADR-025): вход в кабинет по Telegram OIDC — Client ID/Secret из BotFather → Login Widget
+      TELEGRAM_OIDC_CLIENT_ID: "${TELEGRAM_OIDC_CLIENT_ID:-}"
+      TELEGRAM_OIDC_CLIENT_SECRET: "${TELEGRAM_OIDC_CLIENT_SECRET:-}"
+      WEB_BASE_URL: "${WEB_BASE_URL:-http://localhost:8081}"
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      validator: {condition: service_started}
+      metabrain: {condition: service_started}
+      nats: {condition: service_started}
+      postgres: {condition: service_healthy}
+
+  web:
+    <<: *service-stub
+    image: metabrain/web:local
+    command: ["python", "-m", "src.web.app"]
+    environment:
+      SERVICE_NAME: web
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      # T-31 (ADR-025): тонкий клиент API харнесса; публичный адрес кабинета — для Secure-cookie
+      HARNESS_API_URL: "http://harness:8080"
+      HARNESS_API_TOKEN: "${HARNESS_API_TOKEN:?Set HARNESS_API_TOKEN in .env}"
+      WEB_BASE_URL: "${WEB_BASE_URL:-http://localhost:8081}"
+      TELEGRAM_BOT_USERNAME: "${TELEGRAM_BOT_USERNAME:-metabrain_bot}"
+    ports: ["127.0.0.1:8081:8080"]
+    depends_on: [harness]
+
+  validator:
+    <<: *service-stub
+    image: metabrain/validator:local
+    command: ["python", "-m", "src.validator.app"]
+    environment:
+      SERVICE_NAME: validator
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      NATS_URL: "${NATS_URL:-nats://nats:4222}"
+      VALIDATOR_SIGNING_KEY: "${VALIDATOR_SIGNING_KEY:-}"
+      VALIDATOR_PROFILE_SET: "${VALIDATOR_PROFILE_SET:-demo-v1}"
+    depends_on: [nats]
+
+  metabrain:
+    <<: *service-stub
+    image: metabrain/metabrain:local
+    command: ["python", "-m", "src.metabrain.app"]
+    environment:
+      SERVICE_NAME: metabrain
+      APP_BASE_URL: "${APP_BASE_URL:-http://localhost:8080}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      QDRANT_URL: "${QDRANT_URL:-http://qdrant:6333}"
+      NATS_URL: "${NATS_URL:-nats://nats:4222}"
+      # Своя роль БД (ADR-019); пароль суперпользователя сюда не передаётся.
+      METABRAIN_DATABASE_URL: "postgresql://metabrain:${METABRAIN_DB_PASSWORD:-}@postgres:5432/postgres"
+      VALIDATOR_URL: "http://validator:8080"
+      CONSENT_PUBLIC_KEY: "${CONSENT_PUBLIC_KEY:-}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      validator:
+        condition: service_started
+      qdrant:
+        condition: service_started
+
+  metabrain-mcp:        # Внешняя поверхность мета-мозга — MCP (C-5, ADR-022); публиковать только за HTTPS-прокси
+    <<: *service-stub
+    image: metabrain/metabrain:local
+    command: ["python", "-m", "src.metabrain.mcp"]
+    environment:
+      SERVICE_NAME: metabrain-mcp
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      METABRAIN_DATABASE_URL: "postgresql://metabrain:${METABRAIN_DB_PASSWORD:-}@postgres:5432/postgres"
+      VALIDATOR_URL: "http://validator:8080"
+      MCP_CLIENTS: "${MCP_CLIENTS:-}"
+      MCP_ALLOWED_ORIGINS: "${MCP_ALLOWED_ORIGINS:-}"
+    ports: ["127.0.0.1:8082:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      metabrain:
+        condition: service_started
+
+  demo-landscape:       # Учебные crm/stock/pricing для демо (specs/60-demo-landscape.md); наружу не публикуется
+    <<: *service-stub
+    image: metabrain/demo-landscape:local
+    command: ["python", "-m", "src.demo_landscape.app"]
+    environment:
+      SERVICE_NAME: demo-landscape
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      DEMO_LANDSCAPE_TOKENS: "${DEMO_LANDSCAPE_TOKENS:-}"
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
+      HARNESS_DB_PASSWORD: "${HARNESS_DB_PASSWORD:-}"
+      METABRAIN_DB_PASSWORD: "${METABRAIN_DB_PASSWORD:-}"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes: [qdrant:/qdrant/storage]
+
+  nats:
+    image: nats:2-alpine
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  qdrant:

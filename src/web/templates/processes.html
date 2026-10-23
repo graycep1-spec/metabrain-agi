@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Процессы — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Процессы</h1>
+  <p class="muted">Процесс — повторяемое преобразование входов в выходы: разобрать почту, собрать КП, проверить заявку. Прикрепите сотрудника и дайте ему задачи.</p>
+  <form method="post" action="/planning/examples" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button secondary" type="submit">Загрузить примеры</button>
+  </form>
+</div>
+
+{% for p in processes %}
+<div class="card">
+  <h2><a href="/processes/{{ p.process_id }}">{{ p.name }}</a> <span class="tag">{{ p.status }}</span></h2>
+  {% if p.purpose %}<p>{{ p.purpose }}</p>{% endif %}
+  <p class="muted">Входы: {{ p.inputs | join(", ") or "—" }} · Выходы: {{ p.outputs | join(", ") or "—" }}</p>
+  <p class="muted">Сотрудников: {{ p.assignments }} · Задач: {{ p.tasks }}</p>
+</div>
+{% else %}
+<div class="card"><p class="muted">Процессов пока нет. Опишите первый ниже или загрузите примеры.</p></div>
+{% endfor %}
+
+<div class="card">
+  <h2>Новый процесс</h2>
+  <form method="post" action="/processes">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="name">Название</label>
+    <input id="name" name="name" type="text" maxlength="200" required placeholder="Например: Разбор входящей почты">
+    <label for="purpose">Зачем процесс</label>
+    <textarea id="purpose" name="purpose" maxlength="2000" placeholder="Какой результат должен получаться"></textarea>
+    <label for="inputs">Входы (по одному в строке)</label>
+    <textarea id="inputs" name="inputs" placeholder="письма&#10;заявки"></textarea>
+    <label for="outputs">Выходы (по одному в строке)</label>
+    <textarea id="outputs" name="outputs" placeholder="суть&#10;поручения"></textarea>
+    <label for="status">Статус</label>
+    <select id="status" name="status">
+      <option value="active">Работает</option>
+      <option value="paused">На паузе</option>
+      <option value="archived">В архиве</option>
+    </select>
+    <div class="actions"><button class="button" type="submit">Создать процесс</button></div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Изменить паспорт — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Изменить паспорт: {{ title }}</h1>
+  <p class="muted">Изменения станут новой версией только после вашего подтверждения в «Предложениях».
+     Доступ к системам и уровни автономии здесь не меняются.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/employees/{{ employee_id }}/edit">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="title">Роль</label>
+    <input type="text" id="title" name="title" value="{{ form.title }}" required>
+    <label for="mission">Миссия</label>
+    <textarea id="mission" name="mission" required>{{ form.mission }}</textarea>
+    <label for="duties">Обязанности — по одной в строке</label>
+    <textarea id="duties" name="duties" required>{{ form.duties }}</textarea>
+    <label for="goals">Цели — «что | метрика | цель | период», по одной в строке</label>
+    <textarea id="goals" name="goals">{{ form.goals }}</textarea>
+    <label for="may">Может решать сам — по одному в строке</label>
+    <textarea id="may" name="may">{{ form.may }}</textarea>
+    <label for="must_not">Нельзя — по одному в строке</label>
+    <textarea id="must_not" name="must_not">{{ form.must_not }}</textarea>
+    <label for="escalation">Когда спрашивать куратора — по одному в строке</label>
+    <textarea id="escalation" name="escalation">{{ form.escalation }}</textarea>
+    <label for="schedule">Расписание — «cron | номер обязанности», UTC, например <code>*/15 * * * * | 1</code></label>
+    <textarea id="schedule" name="schedule" required>{{ form.schedule }}</textarea>
+    <div class="actions">
+      <button class="button" type="submit">Предложить новую версию</button>
+      <a class="button secondary" href="/employees/{{ employee_id }}">Отмена</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

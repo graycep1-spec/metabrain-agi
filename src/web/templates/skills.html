@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Навыки — MetaBrain{% endblock %}
+{% macro skill_card(s, can_share) %}
+<div class="card">
+  <h3>{{ s.title }}</h3>
+  <p><span class="tag">версия {{ s.version }}</span> <span class="tag">{{ s.applies_to.task_class }}</span>
+     {% for t in s.applies_to.role_tags %}<span class="tag">{{ t }}</span> {% endfor %}</p>
+  <p>{{ s.body }}</p>
+  {% if s.examples %}<p class="muted">Примеры: {{ s.examples | join("; ") }}</p>{% endif %}
+  <p class="muted">Из работ: {{ s.source_jobs | length }} · опубликован {{ s.created_at[:16] | replace("T", " ") }} UTC
+     {% if s.scope == "company" %} · {{ "с согласия автора" if s.consent else "без согласия" }}{% endif %}
+     {% if s.mine and s.scope == "company" %} · ваш{% endif %}</p>
+  {% if can_share %}
+  <form method="post" action="/skills/{{ s.skill_id }}/share" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button secondary" type="submit">Предложить компании</button>
+  </form>
+  {% endif %}
+</div>
+{% endmacro %}
+{% block content %}
+<div class="card">
+  <h1>Навыки</h1>
+  <p class="muted">Навык рождается из рекомендации, которую вы подтвердили. Личный навык работает только у ваших сотрудников;
+    навык компании — у всех, после проверки валидатором и вашего согласия.</p>
+</div>
+<h2>Навыки компании</h2>
+{% for s in company %}{{ skill_card(s, False) }}{% else %}<p class="muted">Пока нет.</p>{% endfor %}
+<h2>Мои навыки</h2>
+{% for s in personal %}{{ skill_card(s, s.mine) }}{% else %}<p class="muted">Пока нет — подтвердите рекомендацию сотрудника в «Предложениях».</p>{% endfor %}
+{% endblock %}

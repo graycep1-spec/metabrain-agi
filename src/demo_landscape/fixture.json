@@ -1,0 +1,67 @@
+{
+  "today": "2026-10-20",
+  "crm": {
+    "orders": [
+      {
+        "order_id": "1042",
+        "client": "ООО Ромашка",
+        "contact": {"name": "Ирина Соколова", "phone": "+7 900 111-22-33", "email": "sokolova@romashka.example"},
+        "items": [{"sku": "A-17", "qty": 10}, {"sku": "B-04", "qty": 100}],
+        "deadline": "2026-10-25",
+        "status": "new",
+        "manager": "manager-a",
+        "quote": null
+      },
+      {
+        "order_id": "1043",
+        "client": "ИП Петров",
+        "contact": {"name": "Олег Петров", "phone": "+7 900 444-55-66", "email": "petrov@ip-petrov.example"},
+        "items": [{"sku": "D-09", "qty": 8}, {"sku": "C-22", "qty": 20}],
+        "deadline": "2026-10-27",
+        "status": "new",
+        "manager": "manager-b",
+        "quote": null
+      },
+      {
+        "order_id": "1037",
+        "client": "ООО Вектор",
+        "contact": {"name": "Анна Белова", "phone": "+7 900 777-88-99", "email": "belova@vektor.example"},
+        "items": [{"sku": "B-04", "qty": 40}],
+        "deadline": "2026-10-22",
+        "status": "quoted",
+        "manager": "manager-a",
+        "quote": {"total": 480, "currency": "RUB"}
+      },
+      {
+        "order_id": "1039",
+        "client": "АО Север",
+        "contact": {"name": "Павел Кузнецов", "phone": "+7 900 123-45-67", "email": "kuznetsov@sever.example"},
+        "items": [{"sku": "C-22", "qty": 10}],
+        "deadline": "2026-10-24",
+        "status": "won",
+        "manager": "manager-b",
+        "quote": {"total": 6500, "currency": "RUB"}
+      }
+    ]
+  },
+  "stock": {
+    "items": [
+      {"sku": "A-17", "title": "Кронштейн стальной", "qty_available": 6, "lead_time_days": 3, "analogs": ["A-17M"]},
+      {"sku": "A-17M", "title": "Кронштейн стальной усиленный", "qty_available": 40, "lead_time_days": 2, "analogs": ["A-17"]},
+      {"sku": "B-04", "title": "Болт М8", "qty_available": 500, "lead_time_days": 1, "analogs": []},
+      {"sku": "C-22", "title": "Профиль 40x40", "qty_available": 120, "lead_time_days": 5, "analogs": []},
+      {"sku": "D-09", "title": "Уголок монтажный", "qty_available": 3, "lead_time_days": 4, "analogs": ["D-09S"]},
+      {"sku": "D-09S", "title": "Уголок монтажный оцинкованный", "qty_available": 50, "lead_time_days": 3, "analogs": ["D-09"]}
+    ]
+  },
+  "pricing": {
+    "prices": [
+      {"sku": "A-17", "cost": 300, "list_price": 400, "min_margin": 0.15},
+      {"sku": "A-17M", "cost": 340, "list_price": 420, "min_margin": 0.15},
+      {"sku": "B-04", "cost": 8, "list_price": 12, "min_margin": 0.15},
+      {"sku": "C-22", "cost": 500, "list_price": 650, "min_margin": 0.15},
+      {"sku": "D-09", "cost": 120, "list_price": 160, "min_margin": 0.15},
+      {"sku": "D-09S", "cost": 140, "list_price": 170, "min_margin": 0.15}
+    ]
+  }
+}

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Проекты — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Проекты</h1>
+  <p class="muted">Проект — ограниченный сроком и бюджетом результат. Прикрепите сотрудников и задачи, чтобы видеть, кто и что делает.</p>
+  <form method="post" action="/planning/examples" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button secondary" type="submit">Загрузить примеры</button>
+  </form>
+</div>
+
+{% for p in projects %}
+<div class="card">
+  <h2><a href="/projects/{{ p.project_id }}">{{ p.name }}</a> <span class="tag">{{ p.status }}</span></h2>
+  {% if p.goal %}<p>{{ p.goal }}</p>{% endif %}
+  <p class="muted">
+    {% if p.starts_on or p.ends_on %}{{ p.starts_on or "…" }} → {{ p.ends_on or "…" }} · {% endif %}
+    Бюджет: {{ "%.2f"|format(p.budget_usd) }} · Сотрудников: {{ p.assignments }} · Задач: {{ p.tasks }}
+  </p>
+</div>
+{% else %}
+<div class="card"><p class="muted">Проектов пока нет. Опишите первый ниже или загрузите примеры.</p></div>
+{% endfor %}
+
+<div class="card">
+  <h2>Новый проект</h2>
+  <form method="post" action="/projects">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="name">Название</label>
+    <input id="name" name="name" type="text" maxlength="200" required placeholder="Например: Пилот в продажах">
+    <label for="goal">Результат</label>
+    <textarea id="goal" name="goal" maxlength="2000" placeholder="Какой ограниченный результат должен быть получен"></textarea>
+    <label for="starts_on">Начало</label>
+    <input id="starts_on" name="starts_on" type="date">
+    <label for="ends_on">Конец</label>
+    <input id="ends_on" name="ends_on" type="date">
+    <label for="budget_usd">Бюджет, $</label>
+    <input id="budget_usd" name="budget_usd" type="number" min="0" step="0.01" value="0">
+    <label for="status">Статус</label>
+    <select id="status" name="status">
+      <option value="planned">Запланирован</option>
+      <option value="active">В работе</option>
+      <option value="paused">На паузе</option>
+      <option value="done">Завершён</option>
+    </select>
+    <div class="actions"><button class="button" type="submit">Создать проект</button></div>
+  </form>
+</div>
+{% endblock %}

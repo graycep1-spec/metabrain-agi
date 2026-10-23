@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Вход — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Кабинет цифровых сотрудников</h1>
+  <p>Войдите через Telegram — тот же аккаунт, с которым вы зарегистрировались в боте
+    {% if bot_username %}<a href="https://t.me/{{ bot_username }}">@{{ bot_username }}</a>{% endif %}.</p>
+  <p><a class="button" href="/login/start">Войти через Telegram</a></p>
+  <p class="muted">Кабинет видит только ваш харнесс: ваших сотрудников, подключения и журнал.</p>
+</div>
+{% endblock %}

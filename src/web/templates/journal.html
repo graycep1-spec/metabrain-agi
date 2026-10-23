@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Журнал — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Журнал</h1>
+  <form method="get" action="/journal" class="actions">
+    <select name="kind" aria-label="Что показать">
+      <option value="">Все записи</option>
+      {% for value, label in journal_kinds.items() %}<option value="{{ value }}" {% if value == kind %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <select name="employee_id" aria-label="Сотрудник">
+      <option value="">Все сотрудники</option>
+      {% for e in employees %}<option value="{{ e.employee_id }}" {% if e.employee_id == employee_id %}selected{% endif %}>{{ e.title }}</option>{% endfor %}
+    </select>
+    <button class="button secondary" type="submit">Показать</button>
+  </form>
+</div>
+<div class="card">
+  {% if entries %}
+  <table>
+    <thead><tr><th>Когда (UTC)</th><th>Что</th><th>Кто</th><th>Подробности</th></tr></thead>
+    <tbody>
+    {% for x in entries %}
+      <tr>
+        <td>{{ x.created_at[:19] | replace("T", " ") }}</td>
+        <td>{{ journal_kinds.get(x.kind, x.kind) }}</td>
+        <td>{{ names.get(x.employee_id, "—") if x.employee_id else "—" }}</td>
+        <td>
+          {% if x.payload.text %}<p>{{ x.payload.text }}</p>{% endif %}
+          <pre>{{ x.payload | tojson(indent=1) | truncate(600) }}</pre>
+          {% if x.sources %}<p class="muted">Источники: {% for s in x.sources %}{{ s.system or "" }} {{ s.object_ref or s.source_id or "" }}{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+          {% if x.score_ref %}<p class="muted">Проверка валидатора: {{ x.score_ref }}</p>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if next_cursor %}<p><a class="button secondary" href="/journal?{{ next_query }}">Дальше</a></p>{% endif %}
+  {% else %}
+  <p class="muted">Записей нет.</p>
+  {% endif %}
+</div>
+{% endblock %}

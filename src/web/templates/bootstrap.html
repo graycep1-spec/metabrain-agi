@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Вход в организацию — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Вы вошли через Telegram</h1>
+  <p>Создайте свою организацию или присоединитесь к существующей по коду приглашения.</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Создать организацию</h2>
+  <p class="muted">Вы станете её куратором, а коллег пригласите кодом из кабинета.</p>
+  <form method="post" action="/bootstrap">
+    <label for="company_name">Название организации</label>
+    <input type="text" id="company_name" name="company_name" maxlength="200" autocomplete="organization" required>
+    <div class="actions"><button class="button" type="submit">Создать и войти</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Присоединиться по приглашению</h2>
+  <p class="muted">Вставьте код или ссылку-приглашение, которую прислал куратор организации.</p>
+  <form method="post" action="/bootstrap">
+    <label for="invite">Код приглашения</label>
+    <input type="text" id="invite" name="invite" value="{{ invite or '' }}" autocomplete="off"
+           placeholder="например, 3nF…ссылка t.me тоже подойдёт" required>
+    <div class="actions"><button class="button secondary" type="submit">Присоединиться</button></div>
+  </form>
+</div>
+
+<p class="muted">Ваши данные видны только вам; другие участники организации — каждый в своём пространстве.</p>
+{% endblock %}
