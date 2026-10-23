@@ -284,8 +284,14 @@ class WorkforceService:
             )
         return {"employee_id": str(employee_id), "status": target}
 
-    def propose_edit(self, identity: Registration, *, employee_id: UUID, patch: Any) -> dict[str, Any]:
-        """Новая версия паспорта по правке куратора — только через предложение (R-24, C-010)."""
+    def propose_edit(self, identity: Registration, *, employee_id: UUID, patch: Any,
+                     kind: str = "passport", summary: str | None = None,
+                     extra_subject: Mapping[str, Any] | None = None,
+                     drafted_by: str = "curator") -> dict[str, Any]:
+        """Новая версия паспорта по правке — только через предложение (R-24, C-010).
+
+        kind="self_improvement" (T-37): тот же путь валидатора и применения, но предложение
+        помечено как улучшение от отладчика и несёт диагноз в subject."""
         employee = self._store.get_employee(employee_id=employee_id, harness_id=identity.harness_id)
         if employee is None:
             raise EmployeeNotFound("employee not found")
@@ -301,7 +307,7 @@ class WorkforceService:
             draft, employee_id=str(employee_id), version=version, kind=employee.kind,
             harness_id=str(identity.harness_id), owner_person_id=str(identity.person_id),
             connectors=base["tools"]["connectors"], read_scopes=base["tools"]["read_scopes"],
-            source="role_text", drafted_by="curator", created_at=self._clock().isoformat(), autonomy=base["autonomy"],
+            source="role_text", drafted_by=drafted_by, created_at=self._clock().isoformat(), autonomy=base["autonomy"],
         )
         diff = passport_diff(base, passport)
         if not diff:
@@ -311,16 +317,16 @@ class WorkforceService:
             artifact, scorecard = self._validate(identity, passport, previous=active)
         except PassportRejected as rejected:
             return {"status": "rejected", "reasons": rejected.reasons, "diff": diff}
-        self._supersede(identity, employee.employee_id, reason=f"Заменено правкой куратора (версия {version})")
+        self._supersede(identity, employee.employee_id, reason=f"Заменено правкой (версия {version})")
         self._store.add_passport(employee_id=employee_id, version=version, passport=passport,
                                  artifact=artifact, scorecard=scorecard)
         subject = {"employee_id": str(employee_id), "version": version, "passport": passport,
-                   "previous_version": employee.active_version}
+                   "previous_version": employee.active_version, **dict(extra_subject or {})}
         if active is not None:
             subject["diff"] = passport_diff(active, passport)  # что изменится при подтверждении
         proposal = self._proposals.create_proposal(
             person_id=identity.person_id, company_id=identity.company_id, harness_id=identity.harness_id,
-            kind="passport", summary=f"Изменить паспорт «{employee.title}» (версия {version})",
+            kind=kind, summary=summary or f"Изменить паспорт «{employee.title}» (версия {version})",
             subject=subject, score_ref=scorecard["scorecard_id"],
         )
         self._store.set_passport_proposal(employee_id=employee_id, version=version, proposal_id=proposal.id)
@@ -329,7 +335,7 @@ class WorkforceService:
     def on_passport_returned(self, identity: Registration, *, proposal_id: UUID) -> dict[str, Any] | None:
         """«Вернуть» по паспорту: версия помечается возвращённой, действующая не меняется."""
         row = self._c.execute(
-            "SELECT subject FROM proposals WHERE id = %s AND harness_id = %s AND kind = 'passport'",
+            "SELECT subject FROM proposals WHERE id = %s AND harness_id = %s AND kind IN ('passport', 'self_improvement')",
             (proposal_id, identity.harness_id),
         ).fetchone()
         if row is None:

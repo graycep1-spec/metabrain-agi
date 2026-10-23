@@ -54,6 +54,7 @@ from src.harness.llm_settings import (
 from src.harness.llm_settings import validate as validate_llm_settings
 from src.landscape.service import LandscapeUnavailable, ResearcherService
 from src.llm.connector import BudgetExceededError
+from src.workforce.improvement import ImprovementFlow
 from src.workforce.runtime import Runtime
 from src.workforce.planning import (
     PlanningConflict,
@@ -102,6 +103,7 @@ class C1Service:
         ask_runtime: Runtime | None = None,
         skills: SkillFlow | None = None,
         vault: HarnessVault | None = None,
+        improvement: ImprovementFlow | None = None,
         system_registry: Collection[str] | None = None,
         settings: Settings | None = None,
         llm_settings_editable: bool = False,
@@ -144,6 +146,8 @@ class C1Service:
         self._llm_settings = LLMSettingsStore(connection)
         # Профиль организации (ADR-035): отрасль/размер/KPI, наследуется ролями.
         self._org = OrgStore(connection)
+        # T-37: модуль самосовершенствования (ADR-029), только через гейт.
+        self._improvement = improvement
         schema = Path(__file__).with_name("api.sql").read_text(encoding="utf-8")
         with connection.transaction():
             connection.execute(schema, prepare=False)
@@ -165,6 +169,8 @@ class C1Service:
             "ask": self.ask,
             "catalog.list": self.list_catalog,
             "org.get": self.get_org,
+            "improvement.scan": self.scan_improvement,
+            "improvement.run": self.run_improvement,
             "org.put": self.put_org,
             "employee.diagnose": self.diagnose_employee,
             "landscape.connect.start": self.start_connect,
@@ -609,6 +615,7 @@ class C1Service:
         handlers = {}
         if self._workforce is not None:
             handlers["passport"] = self._workforce.on_passport_approved
+            handlers["self_improvement"] = self._workforce.on_passport_approved
         if self._researcher is not None:
             handlers["connect"] = self._researcher.on_connect_approved
             handlers["adapter"] = self._researcher.on_adapter_approved
@@ -945,6 +952,23 @@ class C1Service:
         )
         return 200, org
 
+    def _require_improvement(self) -> ImprovementFlow:
+        if self._improvement is None:
+            raise NotImplementedError("self-improvement requires the T-37 module (workforce + LLM)")
+        return self._improvement
+
+    def scan_improvement(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Находки телеметрии (T-37): повторные падения и блокировки ответов. Без LLM."""
+        identity = self._identity(payload)
+        self._requested_harness(payload, identity.harness_id)
+        return 200, {"findings": self._require_improvement().scan(identity)}
+
+    def run_improvement(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Запуск петли (T-37): отладчик драфтит улучшения, куратору — предложения self_improvement."""
+        identity = self._identity(payload)
+        self._requested_harness(payload, identity.harness_id)
+        return 200, self._require_improvement().run(identity)
+
     def list_catalog(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
         """Каталог преднастроенных ролей и процессов (витрина, без полных черновиков)."""
         self._identity(payload)
@@ -1102,6 +1126,7 @@ def create_app(
     ask_runtime: Runtime | None = None,
     skills: SkillFlow | None = None,
     vault: HarnessVault | None = None,
+    improvement: ImprovementFlow | None = None,
     system_registry: Collection[str] | None = None,
     settings: Settings | None = None,
     llm_settings_editable: bool = False,
@@ -1128,6 +1153,7 @@ def create_app(
         ask_runtime=ask_runtime,
         skills=skills,
         vault=vault,
+        improvement=improvement,
         system_registry=system_registry,
     )
     app = FastAPI(title="metabrain-harness", docs_url=None, redoc_url=None)

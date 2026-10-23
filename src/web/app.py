@@ -27,7 +27,7 @@ KINDS = {"twin": "Двойник", "new": "Новый сотрудник", "rese
 STATUSES = {"draft": "Ждёт согласия", "active": "Работает", "paused": "На паузе", "retired": "Выведен"}
 VERSION_STATUSES = {"proposed": "ждёт решения", "active": "действует", "superseded": "заменена", "returned": "возвращена"}
 PROPOSAL_KINDS = {
-    "passport": "Паспорт", "connect": "Подключение", "adapter": "Адаптер", "recommendation": "Рекомендация",
+    "passport": "Паспорт", "connect": "Подключение", "adapter": "Адаптер", "recommendation": "Рекомендация", "self_improvement": "Самосовершенствование",
     "action": "Действие", "skill_publish": "Навык в компанию", "autonomy_change": "Автономия",
 }
 DECISIONS = {"approved": "подтверждено", "returned": "возвращено", "incident": "инцидент", "pending": "ждёт"}
@@ -44,7 +44,7 @@ JOURNAL_KINDS = {
     "adapter.call": "Вызов адаптера", "landscape.discovered": "Карта ландшафта", "auth.web.login": "Вход в кабинет",
     "auth.web.logout": "Выход из кабинета", "consent.external_llm": "Согласие на внешний LLM",
     "secret.stored": "Доступ сохранён", "landscape.discovery_failed": "Исследование не удалось",
-    "answer.blocked": "Ответ не выдан", "help.requested": "Запрос помощи/диагностики", "org.updated": "Профиль организации обновлён", "skill.published": "Навык опубликован", "skill.rejected": "Навык отклонён",
+    "answer.blocked": "Ответ не выдан", "help.requested": "Запрос помощи/диагностики", "org.updated": "Профиль организации обновлён", "self_improvement.proposed": "Улучшение от отладчика", "skill.published": "Навык опубликован", "skill.rejected": "Навык отклонён",
     "skill.failed": "Навык не создан", "employee.paused": "Сотрудник на паузе", "employee.resumed": "Сотрудник возобновлён",
     "proposal.withdrawn": "Предложение заменено", "proposal.applied": "Согласие применено",
     "proposal.decision_denied": "Решение отклонено: не куратор",
@@ -69,6 +69,7 @@ NOTICES = {
     "resumed": "Сотрудник снова работает по расписанию.",
     "llm_saved": "Настройки LLM сохранены. Применятся после перезапуска харнесса.",
     "org_saved": "Профиль организации сохранён. Новые роли будут наследовать KPI, процессы отрасли — первыми в каталоге.",
+    "improved": "Отладчик предложил улучшения — подтвердите их ниже.",
 }
 
 SECURITY_HEADERS = {
@@ -337,6 +338,7 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
         summary_status, summary = await api(request, "planning.summary")
         cat_status, cat = await api(request, "catalog.list")
         gate_status, gate = await api(request, "proposal.list", {"kind": "passport", "status": "pending"})
+        imp_status, imp = await api(request, "improvement.scan")
         pipeline = {
             "drafts": sum(1 for e in items if e.get("status") == "draft"),
             "gate": len(gate.get("proposals", [])) if gate_status == 200 else 0,
@@ -346,7 +348,27 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
         return page("employees.html", groups=ordered, roles=roles, role=role, sel_status=status, total=len(shown),
                     csrf_token=csrf_of(request), kinds=KINDS, statuses=STATUSES, pipeline=pipeline,
                     catalog_roles=cat.get("roles", []) if cat_status == 200 else [],
+                    improvement_findings=imp.get("findings", []) if imp_status == 200 else None,
                     planning=summary if summary_status == 200 else None, notice=NOTICES.get(request.query_params.get("notice", "")))
+
+    @app.post("/improve")
+    async def improve(request: Request):
+        fields = await form(request)
+        status, body = await api(request, "improvement.run", {}, csrf=fields.get("csrf_token", ""))
+        if status == 403:
+            return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
+        if status == 429:
+            return message("Бюджет исчерпан", "Дневной лимит затрат на модели исчерпан — попробуйте завтра.", 429,
+                           {"href": "/", "label": "Назад"}, csrf_token=csrf_of(request))
+        if status != 200:
+            return message("Самосовершенствование недоступно", "Нужен доступ к модели и валидатору. Попробуйте позже.", 503,
+                           {"href": "/", "label": "Назад"}, csrf_token=csrf_of(request))
+        if body.get("proposals"):
+            return RedirectResponse("/proposals?notice=improved", status_code=303)
+        detail = ("Отладчик не смог собрать улучшение по текущим находкам."
+                  if body.get("findings") else "Повторяющихся проблем в телеметрии не найдено — улучшать нечего.")
+        return message("Улучшений нет", detail, 200, {"href": "/", "label": "К сотрудникам"},
+                       csrf_token=csrf_of(request))
 
     @app.post("/roles/from-template")
     async def create_role_from_template(request: Request):

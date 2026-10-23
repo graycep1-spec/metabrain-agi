@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS proposals (
             'adapter',
             'connect',
             'skill_publish',
-            'autonomy_change'
+            'autonomy_change',
+            'self_improvement'
         )
     ),
     summary TEXT NOT NULL CHECK (length(trim(summary)) > 0),
@@ -54,3 +55,10 @@ CREATE TABLE IF NOT EXISTS consent_tokens (
 
 CREATE INDEX IF NOT EXISTS consent_tokens_proposal_idx
     ON consent_tokens (proposal_id, harness_id);
+
+-- Миграция T-37 (ADR-029): на существующих БД расширяем список видов предложений.
+ALTER TABLE proposals DROP CONSTRAINT IF EXISTS proposals_kind_check;
+ALTER TABLE proposals ADD CONSTRAINT proposals_kind_check CHECK (
+    kind IN ('passport', 'recommendation', 'action', 'adapter', 'connect',
+             'skill_publish', 'autonomy_change', 'self_improvement')
+);

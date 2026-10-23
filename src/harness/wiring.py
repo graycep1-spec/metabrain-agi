@@ -29,6 +29,7 @@ from src.workforce.passport import LLMPassportDrafter
 from src.workforce.reports import HarnessReportSink
 from src.workforce.runtime import Runtime, RuntimeThread
 from src.workforce.service import WorkforceService
+from src.workforce.improvement import ImprovementFlow
 from src.workforce.skills import SkillFlow
 from src.workforce.swarm import SwarmHandler, visible_skills
 
@@ -104,12 +105,18 @@ def build_extensions(connection: Connection, settings: Settings, secret_store: E
         on_new_system=lambda identity, system: workforce.propose_tool_extension(identity, system=system),
     )
     holder["researcher"] = researcher
+    # T-37: отладчик читает телеметрию и предлагает улучшения через гейт (ADR-029).
+    extensions_improvement = ImprovementFlow(
+        connection, connector=build_connector(policy, settings, connection, llm_secrets),
+        workforce=workforce, journal=journal,
+    )
     metabrain = build_metabrain(source)
     swarm = build_swarm(connection, settings, llm_secrets, policy=policy, validator=validator,
                         proposals=proposals, journal=journal, researcher=researcher, metabrain=metabrain)
     # `ask` (T-14): отчёт — в журнал; ответ вернёт сам вызов, поэтому в Telegram отдельно не шлём.
     ask_runtime = Runtime(connection, handler=swarm, sink=HarnessReportSink(connection, send=None))
-    extensions = {"workforce": workforce, "researcher": researcher, "ask_runtime": ask_runtime, "vault": vault}
+    extensions = {"workforce": workforce, "researcher": researcher, "ask_runtime": ask_runtime, "vault": vault,
+                  "improvement": extensions_improvement}
     if metabrain is not None:
         extensions["skills"] = SkillFlow(
             connection, connector=build_connector(policy, settings, connection, llm_secrets), metabrain=metabrain,

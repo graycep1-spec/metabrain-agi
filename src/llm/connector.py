@@ -83,7 +83,7 @@ class LLMContext:
         for name in ("company_id", "harness_id", "employee_id", "job_id"):
             if not getattr(self, name).strip():
                 raise ValueError(f"{name} is required")
-        if self.sub_role not in {"analyst", "developer", "critic", "researcher"}:
+        if self.sub_role not in {"analyst", "developer", "critic", "researcher", "debugger"}:
             raise ValueError("unsupported LLM sub_role")
 
 

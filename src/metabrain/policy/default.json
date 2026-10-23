@@ -5,11 +5,22 @@
       "analyst": "deepseek-flash",
       "developer": "deepseek-flash",
       "researcher": "deepseek-flash",
-      "critic": "deepseek-v4-pro"
+      "critic": "deepseek-v4-pro",
+      "debugger": "deepseek-v4-pro"
     },
     "providers": {
-      "deepseek-flash": {"model": "deepseek-flash", "family": "deepseek-v4.1-flash", "max_tokens": 8192, "temperature": 0.2},
-      "deepseek-v4-pro": {"model": "deepseek-v4-pro", "family": "deepseek-v4-pro", "max_tokens": 8192, "temperature": 0.0}
+      "deepseek-flash": {
+        "model": "deepseek-flash",
+        "family": "deepseek-v4.1-flash",
+        "max_tokens": 8192,
+        "temperature": 0.2
+      },
+      "deepseek-v4-pro": {
+        "model": "deepseek-v4-pro",
+        "family": "deepseek-v4-pro",
+        "max_tokens": 8192,
+        "temperature": 0.0
+      }
     }
   },
   "pricing": {
@@ -18,26 +29,63 @@
     "source": "https://api-docs.deepseek.com/quick_start/pricing/",
     "tier": "peak",
     "per_million_tokens": {
-      "deepseek-flash": {"input_cache_hit": 0.006, "input_cache_miss": 0.3, "output": 1.2},
-      "deepseek-v4-pro": {"input_cache_hit": 0.044, "input_cache_miss": 1.32, "output": 3.96}
+      "deepseek-flash": {
+        "input_cache_hit": 0.006,
+        "input_cache_miss": 0.3,
+        "output": 1.2
+      },
+      "deepseek-v4-pro": {
+        "input_cache_hit": 0.044,
+        "input_cache_miss": 1.32,
+        "output": 3.96
+      }
     }
   },
   "limits": {
-    "budget_usd_total": {"installation": 5.0},
-    "budget_usd_per_day": {"harness": 1.0, "employee": 0.5},
-    "tokens_per_day": {"harness": 1500000, "employee": 750000},
-    "actions_per_hour": {"employee": null}
+    "budget_usd_total": {
+      "installation": 5.0
+    },
+    "budget_usd_per_day": {
+      "harness": 1.0,
+      "employee": 0.5
+    },
+    "tokens_per_day": {
+      "harness": 1500000,
+      "employee": 750000
+    },
+    "actions_per_hour": {
+      "employee": null
+    }
   },
-  "dlp_rules": {"pii": "mask", "secret": "drop"},
+  "dlp_rules": {
+    "pii": "mask",
+    "secret": "drop"
+  },
   "autonomy": {
     "allowed_l2_classes": {},
     "promotion_thresholds": {
-      "L0_to_L1": {"min_decided": 10, "accepted_ratio": 0.8},
-      "L1_to_L2": {"min_decided": 20, "accepted_ratio": 0.9, "eval_score": 0.9, "incident_free_days": 14}
+      "L0_to_L1": {
+        "min_decided": 10,
+        "accepted_ratio": 0.8
+      },
+      "L1_to_L2": {
+        "min_decided": 20,
+        "accepted_ratio": 0.9,
+        "eval_score": 0.9,
+        "incident_free_days": 14
+      }
     }
   },
   "max_employees": null,
-  "web": {"session_ttl_hours": 12},
+  "web": {
+    "session_ttl_hours": 12
+  },
   "grounding_threshold": 0.0,
-  "mcp_scopes": {"demo-ide": ["skills_resolve", "retrieval_search", "policy_get"]}
+  "mcp_scopes": {
+    "demo-ide": [
+      "skills_resolve",
+      "retrieval_search",
+      "policy_get"
+    ]
+  }
 }

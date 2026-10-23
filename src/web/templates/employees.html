@@ -29,6 +29,22 @@
   <p class="muted">Каждая роль проходит одинаково: черновик паспорта (из каталога или описания) → проверка валидатором → ваше согласие → работа по расписанию. {% if pipeline.gate %}Сейчас {{ pipeline.gate }} ждёт вашего решения в <a href="/proposals">Предложениях</a>.{% endif %}</p>
 </div>
 {% endif %}
+{% if improvement_findings is not none %}
+<div class="card">
+  <h2>Самосовершенствование</h2>
+  {% if improvement_findings %}
+  <p><span class="tag warn">находок: {{ improvement_findings | length }}</span>
+    {% for f in improvement_findings[:3] %}{{ f.title }}: {{ f.detail }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+  {% else %}
+  <p class="muted"><span class="tag ok">чисто</span> Повторяющихся проблем в телеметрии за неделю нет.</p>
+  {% endif %}
+  <p class="muted">Отладчик читает телеметрию харнесса и драфтит улучшения паспортов. Применение — только после вашего согласия (ADR-029).</p>
+  <form method="post" action="/improve" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="button {{ '' if improvement_findings else 'secondary' }}" type="submit">Проверить и предложить улучшения</button>
+  </form>
+</div>
+{% endif %}
 {% if planning %}
 <div class="card">
   <h2>Планирование</h2>

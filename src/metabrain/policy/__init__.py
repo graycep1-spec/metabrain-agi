@@ -8,7 +8,7 @@ from typing import Any
 
 
 DEFAULT_POLICY_PATH = Path(__file__).with_name("default.json")
-SUB_ROLES = ("analyst", "developer", "critic", "researcher")
+SUB_ROLES = ("analyst", "developer", "critic", "researcher", "debugger")
 LEVEL_KEYS = ("L0_to_L1", "L1_to_L2")
 MCP_TOOLS = ("skills_resolve", "retrieval_search", "policy_get")
 

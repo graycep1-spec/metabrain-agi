@@ -10,7 +10,11 @@
   <h2>{{ p.summary }}</h2>
   <p><span class="tag">{{ kinds.get(p.kind, p.kind) }}</span> <span class="muted">{{ p.created_at[:16] | replace("T", " ") }}</span></p>
   {% set s = p.payload %}
-  {% if p.kind == "passport" %}
+  {% if p.kind == "self_improvement" and s.diagnosis %}
+    <p><b>Диагноз отладчика:</b> {{ s.diagnosis }}</p>
+    {% if s.finding %}<p class="muted">Находка телеметрии: {{ s.finding.detail }}</p>{% endif %}
+  {% endif %}
+  {% if p.kind == "passport" or p.kind == "self_improvement" %}
     {% if s.diff %}
       <p><b>Что меняется (версия {{ s.previous_version }} → {{ s.version }}):</b></p>
       <ul>
