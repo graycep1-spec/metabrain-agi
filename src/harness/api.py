@@ -41,6 +41,7 @@ from src.harness.web_auth import (
     WebAuthNotConfigured,
 )
 from src.harness.vault import SERVICE_SECRET, VAULT_REF, HarnessVault, SecretStore, VaultUnavailable
+from src.workforce.catalog import listing as catalog_listing, process_template
 from src.harness.llm_settings import (
     DEFAULT_MODEL_JUDGE,
     DEFAULT_MODEL_MAIN,
@@ -158,6 +159,8 @@ class C1Service:
             "proposal.decide": self.decide_proposal,
             "journal.list": self.list_journal,
             "ask": self.ask,
+            "catalog.list": self.list_catalog,
+            "employee.diagnose": self.diagnose_employee,
             "landscape.connect.start": self.start_connect,
             "landscape.connect": self.connect_landscape,
             "landscape.secret.put": self.put_secret,
@@ -325,6 +328,11 @@ class C1Service:
         kind = payload.get("kind")
         if kind not in {"twin", "new"}:
             raise ValueError("kind must be twin or new")
+        template_id = self._optional_text(payload, "template_id")
+        if template_id and self._workforce is not None:
+            # Готовая роль из каталога: без LLM, но тем же конвейером (валидатор → гейт).
+            result = self._workforce.draft_from_template(identity, template_id=template_id)
+            return (422 if result.get("status") == "rejected" else 201), result
         role_text = self._required_text(payload, "role_text")
         if self._workforce is not None:
             result = self._workforce.draft(identity, kind=kind, role_text=role_text)
@@ -435,6 +443,13 @@ class C1Service:
 
     def create_process(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
         identity = self._identity(payload)
+        template = process_template(self._optional_text(payload, "template_id"))
+        if template is not None:
+            # Процесс из каталога: поля — из шаблона, создание — обычным путём.
+            return 201, self._planning.create_process(
+                identity, name=template["name"], purpose=template["purpose"],
+                inputs=template["inputs"], outputs=template["outputs"],
+            )
         return 201, self._planning.create_process(
             identity, name=payload.get("name"), purpose=payload.get("purpose", ""),
             inputs=payload.get("inputs", []), outputs=payload.get("outputs", []),
@@ -903,6 +918,47 @@ class C1Service:
             return 422, {"error": "answer_blocked", "message": report["text"], "reasons": report.get("reasons", [])}
         return 200, {"answer": report["text"], "sources": report["sources"], "score_ref": report["score_ref"],
                      "proposal_ids": report.get("proposal_ids", []), "employee_id": str(employee.employee_id)}
+
+    def list_catalog(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Каталог преднастроенных ролей и процессов (витрина, без полных черновиков)."""
+        self._identity(payload)
+        return 200, catalog_listing()
+
+    def diagnose_employee(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Помощь/диагностика (ADR-029, гейт): рой сотрудника разбирает журнал и вопрос куратора.
+
+        Диагноз возвращается куратору; рекомендация из ответа идёт обычным путём —
+        предложение → согласие куратора → навык (SkillFlow). Автономной правки нет.
+        """
+        identity = self._identity(payload)
+        self._requested_harness(payload, identity.harness_id)
+        employee_id = self._optional_uuid(payload, "employee_id")
+        if employee_id is None:
+            raise ValueError("employee_id is required")
+        question = (self._optional_text(payload, "question") or "").strip()[:500]
+        page = self._journal.list_entries(person_id=identity.person_id, harness_id=identity.harness_id,
+                                          employee_id=employee_id, page_size=15)
+        lines = []
+        for entry in page.entries:
+            piece = ", ".join(f"{k}={str(v)[:80]}" for k, v in list(entry.payload.items())[:4])
+            lines.append(f"- {entry.created_at:%d.%m %H:%M} {entry.kind}: {piece}"[:220])
+        digest = "\n".join(lines) or "- журнал пуст"
+        self._journal.append_entry(
+            person_id=identity.person_id, company_id=identity.company_id, harness_id=identity.harness_id,
+            kind="help.requested", employee_id=employee_id,
+            payload={"question": question or "(без вопроса)"},
+        )
+        text = (
+            "Режим диагностики. Ты — диагност этого цифрового сотрудника. Ниже журнал его последних событий. "
+            "Определи, что сломано или выглядит странно, объясни причину коротко и по делу. "
+            "Если видишь, как это исправить — дай рекомендацию (она уйдёт куратору на согласование).\n"
+            f"Вопрос куратора: {question or 'разбери последние ошибки и странности'}\n"
+            f"Журнал:\n{digest}"
+        )
+        status, body = self.ask({**dict(payload), "text": text, "employee_id": str(employee_id)})
+        if status == 200:
+            body["diagnosis"] = True
+        return status, body
 
     def _identity(self, payload: Mapping[str, Any]):
         session_identity = payload.get("_session_identity")

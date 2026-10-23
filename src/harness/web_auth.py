@@ -36,7 +36,7 @@ READ_OPERATIONS = frozenset({
     "employee.list", "employee.get", "employee.autonomy", "proposal.list",
     "journal.list", "landscape.map", "skills.list",
     "process.list", "process.get", "project.list", "project.get",
-    "task.list", "planning.summary", "settings.llm.get",
+    "task.list", "planning.summary", "settings.llm.get", "catalog.list",
 })
 logger = logging.getLogger(__name__)
 

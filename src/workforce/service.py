@@ -17,6 +17,7 @@ from src.common.secrets import SecretNotFoundError
 from src.llm.connector import LLMContext, ProviderResponseError
 from src.metabrain.policy import load_policy
 from src.validator.client import ValidatorClient, ValidatorUnavailable
+from src.workforce.catalog import role_template
 from src.validator.scorecard import ScoreCardRejected, verify_scorecard
 from src.workforce.passport import (
     DraftError,
@@ -62,14 +63,7 @@ class WorkforceUnavailable(RuntimeError):
     code = "workforce_unavailable"
 
 
-SEED_TWIN_DRAFT = """{
-  "role": {"title": "Менеджер по продажам", "mission": "Готовить КП по новым заявкам"},
-  "duties": [{"text": "Разбирать новые заявки"}, {"text": "Сверять наличие и сроки"}, {"text": "Готовить черновик КП"}],
-  "goals": [{"text": "КП по заявке за 2 часа", "metric": "quote_hours", "target": "2", "period": "day"}],
-  "decision_bounds": {"may": ["предлагать аналоги из каталога"], "must_not": ["давать скидку ниже минимальной маржи"]},
-  "escalation": [{"condition": "нет позиции и подходящего аналога"}],
-  "schedule": [{"cron": "0 9 * * 1-5", "duty": 1}]
-}"""
+#  Образцовый черновик «Менеджер по продажам» переехал в каталог ролей (src/workforce/catalog.py).
 
 
 class WorkforceService:
@@ -138,14 +132,22 @@ class WorkforceService:
         return self._draft_from(identity, employee_id=employee_id, kind=kind, draft=draft)
 
     def seed_twin(self, identity: Registration) -> dict[str, Any]:
-        """Пример-сотрудник в шаблон новой организации (ADR-030): канонический черновик без LLM, через валидатор, предложением куратору."""
+        """Пример-сотрудник в шаблон новой организации (ADR-030): роль из каталога, без LLM, через валидатор."""
+        return self.draft_from_template(identity, template_id="sales-manager")
+
+    def draft_from_template(self, identity: Registration, *, template_id: str) -> dict[str, Any]:
+        """Готовая роль из каталога: без LLM, но тем же конвейером — валидатор → предложение → гейт куратора."""
+        template = role_template(template_id)
+        if template is None:
+            raise ValueError(f"unknown role template: {template_id!r}")
         self._store.ensure_researcher(company_id=identity.company_id, harness_id=identity.harness_id)
-        return self._draft_from(identity, employee_id=uuid4(), kind="new", draft=parse_draft(SEED_TWIN_DRAFT))
+        return self._draft_from(identity, employee_id=uuid4(), kind="new",
+                                draft=parse_draft(template["draft"]), source="template")
 
     def _draft_from(self, identity: Registration, *, employee_id: UUID, kind: str,
-                    draft: Mapping[str, Any]) -> dict[str, Any]:
+                    draft: Mapping[str, Any], source: str = "role_text") -> dict[str, Any]:
         passport = self._build(identity, employee_id=employee_id, version=1, kind=kind, draft=draft,
-                               source="role_text", drafted_by="developer")
+                               source=source, drafted_by="developer")
         try:
             artifact, scorecard = self._validate(identity, passport, previous=None)
         except PassportRejected as rejected:

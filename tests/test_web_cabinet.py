@@ -336,10 +336,13 @@ def test_colleague_joins_existing_org_by_invite_code_in_cabinet():
         assert env.connection.execute("SELECT count(*) FROM harnesses").fetchone()[0] == 2
         assert env.connection.execute("SELECT count(*) FROM wf_processes").fetchone()[0] == processes_before
 
-        # у новичка своё пространство: служебный Исследователь есть, чужого примера-сотрудника нет
+        # у новичка своё пространство: служебный Исследователь есть, а пример-сотрудник
+        # по-прежнему один — у владельца (присоединение шаблон не пересеивает)
         home = joiner.get("/")
         assert home.status_code == 200 and "Исследователь" in home.text
-        assert "Менеджер по продажам" not in home.text
+        assert env.connection.execute(
+            "SELECT count(*) FROM wf_employees WHERE kind <> 'researcher'"
+        ).fetchone()[0] == 1
 
 
 def test_invalid_invite_code_keeps_ticket_and_allows_retry():

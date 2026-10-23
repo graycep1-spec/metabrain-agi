@@ -16,6 +16,19 @@
     {% if role or sel_status %}<a class="button secondary" href="/">Сбросить</a>{% endif %}
   </form>
 </div>
+{% if pipeline %}
+<div class="card">
+  <h2>Конвейер найма</h2>
+  <p>
+    <span class="tag">Спека / каталог</span> →
+    <span class="tag">Паспорт: рой + валидатор</span> →
+    <a href="/proposals"><span class="tag {{ 'warn' if pipeline.gate else '' }}">Гейт куратора · {{ pipeline.gate }}</span></a> →
+    <span class="tag ok">Активен · {{ pipeline.active }}</span>
+    {% if pipeline.paused %} · <span class="tag">Пауза · {{ pipeline.paused }}</span>{% endif %}
+  </p>
+  <p class="muted">Каждая роль проходит одинаково: черновик паспорта (из каталога или описания) → проверка валидатором → ваше согласие → работа по расписанию. {% if pipeline.gate %}Сейчас {{ pipeline.gate }} ждёт вашего решения в <a href="/proposals">Предложениях</a>.{% endif %}</p>
+</div>
+{% endif %}
 {% if planning %}
 <div class="card">
   <h2>Планирование</h2>
@@ -28,6 +41,17 @@
 {% endif %}
 <div class="card">
   <h2>Создать роль</h2>
+  {% if catalog_roles %}
+  <p class="muted">Готовая роль из каталога — мгновенно, без модели; дальше тот же путь: валидатор → ваше согласие.</p>
+  <form method="post" action="/roles/from-template" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <select name="template_id" aria-label="Роль из каталога" style="max-width: 420px;">
+      {% for t in catalog_roles %}<option value="{{ t.id }}">{{ t.title }} — {{ t.summary }}</option>{% endfor %}
+    </select>
+    <button class="button" type="submit">Создать из каталога</button>
+  </form>
+  <h3>Или опишите свою</h3>
+  {% endif %}
   <p class="muted">Опишите роль — модель соберёт паспорт, а вы подтвердите его в «Предложениях». После этого сотрудника можно прикрепить к процессу или проекту.</p>
   <form method="post" action="/roles">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

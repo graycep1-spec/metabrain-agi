@@ -44,7 +44,7 @@ JOURNAL_KINDS = {
     "adapter.call": "Вызов адаптера", "landscape.discovered": "Карта ландшафта", "auth.web.login": "Вход в кабинет",
     "auth.web.logout": "Выход из кабинета", "consent.external_llm": "Согласие на внешний LLM",
     "secret.stored": "Доступ сохранён", "landscape.discovery_failed": "Исследование не удалось",
-    "answer.blocked": "Ответ не выдан", "skill.published": "Навык опубликован", "skill.rejected": "Навык отклонён",
+    "answer.blocked": "Ответ не выдан", "help.requested": "Запрос помощи/диагностики", "skill.published": "Навык опубликован", "skill.rejected": "Навык отклонён",
     "skill.failed": "Навык не создан", "employee.paused": "Сотрудник на паузе", "employee.resumed": "Сотрудник возобновлён",
     "proposal.withdrawn": "Предложение заменено", "proposal.applied": "Согласие применено",
     "proposal.decision_denied": "Решение отклонено: не куратор",
@@ -334,9 +334,37 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
         # роли по алфавиту, служебный Исследователь — в конце
         ordered = sorted(groups.values(), key=lambda g: (g["kind"] == "researcher", (g["role"] or "").lower()))
         summary_status, summary = await api(request, "planning.summary")
+        cat_status, cat = await api(request, "catalog.list")
+        gate_status, gate = await api(request, "proposal.list", {"kind": "passport", "status": "pending"})
+        pipeline = {
+            "drafts": sum(1 for e in items if e.get("status") == "draft"),
+            "gate": len(gate.get("proposals", [])) if gate_status == 200 else 0,
+            "active": sum(1 for e in items if e.get("status") == "active" and e.get("kind") != "researcher"),
+            "paused": sum(1 for e in items if e.get("status") == "paused"),
+        }
         return page("employees.html", groups=ordered, roles=roles, role=role, sel_status=status, total=len(shown),
-                    csrf_token=csrf_of(request), kinds=KINDS, statuses=STATUSES,
+                    csrf_token=csrf_of(request), kinds=KINDS, statuses=STATUSES, pipeline=pipeline,
+                    catalog_roles=cat.get("roles", []) if cat_status == 200 else [],
                     planning=summary if summary_status == 200 else None, notice=NOTICES.get(request.query_params.get("notice", "")))
+
+    @app.post("/roles/from-template")
+    async def create_role_from_template(request: Request):
+        fields = await form(request)
+        template_id = fields.get("template_id", "").strip()
+        if not template_id:
+            return RedirectResponse("/", status_code=303)
+        status, body = await api(request, "employee.draft", {"kind": "new", "template_id": template_id},
+                                 csrf=fields.get("csrf_token", ""))
+        if status == 201:
+            return RedirectResponse("/proposals?notice=proposed", status_code=303)
+        if status == 403:
+            return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
+        if status == 422:
+            reasons = "; ".join(body.get("reasons", [])) or body.get("detail", "паспорт отклонён")
+            return message("Роль не создана", f"Валидатор не пропустил паспорт: {reasons}", 422,
+                           {"href": "/", "label": "Назад"}, csrf_token=csrf_of(request))
+        return message("Роль не создана", "Сервис временно недоступен. Попробуйте позже.", 503,
+                       {"href": "/", "label": "Назад"}, csrf_token=csrf_of(request))
 
     @app.post("/roles")
     async def create_role(request: Request):
@@ -383,6 +411,27 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
         return page("employee.html", e=body, p=body.get("passport"), csrf_token=csrf_of(request), notice=NOTICES.get(notice),
                     autonomy=autonomy if autonomy_status == 200 else None, metric_names=METRIC_NAMES,
                     kinds=KINDS, statuses=STATUSES, version_statuses=VERSION_STATUSES)
+
+    @app.post("/employees/{employee_id}/diagnose")
+    async def diagnose(request: Request, employee_id: str):
+        fields = await form(request)
+        status, body = await api(request, "employee.diagnose",
+                                 {"employee_id": employee_id, "question": fields.get("question", "")},
+                                 csrf=fields.get("csrf_token", ""))
+        if status == 403:
+            return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
+        if status == 422:
+            return message("Диагноз не выдан", body.get("message", "Ответ не прошёл проверку валидатора."), 422,
+                           {"href": f"/employees/{employee_id}", "label": "Назад"}, csrf_token=csrf_of(request))
+        if status == 429:
+            return message("Бюджет исчерпан", "Дневной лимит затрат на модели исчерпан — попробуйте завтра.", 429,
+                           {"href": f"/employees/{employee_id}", "label": "Назад"}, csrf_token=csrf_of(request))
+        if status != 200:
+            return message("Диагностика недоступна", "Нужен доступ к модели и валидатору. Попробуйте позже.", 503,
+                           {"href": f"/employees/{employee_id}", "label": "Назад"}, csrf_token=csrf_of(request))
+        return page("diagnosis.html", employee_id=employee_id, answer=body.get("answer", ""),
+                    sources=body.get("sources", []), proposals=body.get("proposal_ids", []),
+                    csrf_token=csrf_of(request))
 
     @app.post("/employees/{employee_id}/pause")
     async def pause(request: Request, employee_id: str):
@@ -634,8 +683,25 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
         status, body = await api(request, "process.list")
         if status != 200:
             return message("Кабинет недоступен", "Сервис временно недоступен. Попробуйте позже.", 503)
+        cat_status, cat = await api(request, "catalog.list")
         return page("processes.html", processes=body.get("processes", []), csrf_token=csrf_of(request),
+                    catalog_processes=cat.get("processes", []) if cat_status == 200 else [],
                     notice=NOTICES.get(notice))
+
+    @app.post("/processes/from-template")
+    async def create_process_from_template(request: Request):
+        fields = await form(request)
+        template_id = fields.get("template_id", "").strip()
+        if not template_id:
+            return RedirectResponse("/processes", status_code=303)
+        status, _ = await api(request, "process.create", {"template_id": template_id},
+                              csrf=fields.get("csrf_token", ""))
+        if status == 201:
+            return RedirectResponse("/processes?notice=process_created", status_code=303)
+        if status == 403:
+            return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
+        return message("Процесс не создан", "Сервис временно недоступен. Попробуйте позже.", 503,
+                       {"href": "/processes", "label": "Назад"}, csrf_token=csrf_of(request))
 
     @app.post("/processes")
     async def create_process(request: Request):

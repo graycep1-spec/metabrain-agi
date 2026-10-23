@@ -23,6 +23,17 @@
 
 <div class="card">
   <h2>Новый процесс</h2>
+  {% if catalog_processes %}
+  <p class="muted">Готовый процесс из каталога:</p>
+  <form method="post" action="/processes/from-template" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <select name="template_id" aria-label="Процесс из каталога" style="max-width: 420px;">
+      {% for t in catalog_processes %}<option value="{{ t.id }}">{{ t.name }} — {{ t.purpose }}</option>{% endfor %}
+    </select>
+    <button class="button" type="submit">Создать из каталога</button>
+  </form>
+  <h3>Или свой</h3>
+  {% endif %}
   <form method="post" action="/processes">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label for="name">Название</label>

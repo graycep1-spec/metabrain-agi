@@ -63,6 +63,17 @@
 </div>
 {% endif %}
 <div class="card">
+  <h2>Помощь / диагностика</h2>
+  <p class="muted">Сотрудник упёрся или делает странное? Диагност разберёт журнал последних событий и ваш вопрос.
+    Если найдётся исправление — оно придёт вам предложением: после согласия станет навыком сотрудника.</p>
+  <form method="post" action="/employees/{{ e.employee_id }}/diagnose">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="question">Что случилось? (необязательно)</label>
+    <textarea id="question" name="question" maxlength="500" placeholder="Например: второй день не готовит КП по заявкам — почему?"></textarea>
+    <div class="actions"><button class="button secondary" type="submit">Разобрать проблему</button></div>
+  </form>
+</div>
+<div class="card">
   <h2>Версии паспорта</h2>
   <table>
     <thead><tr><th>Версия</th><th>Статус</th><th>Создана</th></tr></thead>

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Диагноз — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Диагноз</h1>
+  <pre>{{ answer }}</pre>
+  {% if sources %}
+  <p class="muted">Источники: {% for s in sources %}<code>{{ s }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+  {% endif %}
+  {% if proposals %}
+  <p><span class="tag ok">рекомендация готова</span> Диагност предложил исправление — подтвердите его в
+    <a href="/proposals">Предложениях</a>, после согласия оно станет навыком сотрудника.</p>
+  {% else %}
+  <p class="muted">Готового исправления диагност не предложил — см. разбор выше.</p>
+  {% endif %}
+  <div class="actions">
+    <a class="button" href="/employees/{{ employee_id }}">К сотруднику</a>
+    {% if proposals %}<a class="button secondary" href="/proposals">К предложениям</a>{% endif %}
+  </div>
+</div>
+{% endblock %}
