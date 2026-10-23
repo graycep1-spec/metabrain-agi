@@ -20,6 +20,7 @@ from src.workforce.store import Employee, Job, WorkforceStore
 
 TICK = timedelta(seconds=30)
 CATCH_UP = timedelta(minutes=15)
+AUTO_DIAGNOSE_WINDOW = timedelta(hours=6)
 LEASE = timedelta(minutes=5)
 MAX_JOBS_PER_TICK = 20
 
@@ -78,6 +79,7 @@ class Runtime:
         sink: ReportSink,
         clock: Callable[[], datetime] | None = None,
         lease: timedelta = LEASE,
+        auto_diagnose: bool = True,
     ):
         self._c = connection
         self._store = WorkforceStore(connection)
@@ -85,6 +87,9 @@ class Runtime:
         self._sink = sink
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._lease = lease
+        # Авто-диагност (ADR-034): упавшая работа сама зовёт помощь — рой разбирает журнал,
+        # отчёт уходит куратору, рекомендация — предложением. Не чаще раза в окно на сотрудника.
+        self._auto_diagnose = auto_diagnose
 
     # --- планировщик ----------------------------------------------------------------
 
@@ -156,11 +161,54 @@ class Runtime:
             log.exception("job %s failed", job.job_id)
             with self._c.transaction():
                 self._store.fail_job(job_id=job.job_id, error=f"{type(error).__name__}: {error}")
+            self._maybe_auto_diagnose(job, employee, f"{type(error).__name__}: {error}")
             return "failed"
         with self._c.transaction():
             self._store.finish_job(job_id=job.job_id, report=report)
         self._sink.deliver(job, report)
         return "done"
+
+    def _maybe_auto_diagnose(self, job: Job, employee: Employee, error_text: str) -> None:
+        """Упавшая работа зовёт диагноста сама (ADR-034): отдельная работа тем же роем.
+
+        Защита от зацикливания: упавшую диагностику не диагностируем; на сотрудника —
+        не чаще раза в AUTO_DIAGNOSE_WINDOW. Бюджет и DLP — те же, что у обычного `ask`.
+        """
+        if not self._auto_diagnose or (job.input or {}).get("diagnosis"):
+            return
+        try:
+            from src.harness.journal import JournalStore
+            from src.workforce import diagnosis
+
+            now = self._clock()
+            with self._c.transaction():
+                owner = self._c.execute(
+                    "SELECT owner_person_id FROM harnesses WHERE id = %s", (job.harness_id,)
+                ).fetchone()
+                recent = self._c.execute(
+                    "SELECT count(*) FROM journal_entries WHERE harness_id = %s AND employee_id = %s "
+                    "AND kind = 'help.requested' AND payload->>'auto' = 'true' AND created_at > %s",
+                    (job.harness_id, job.employee_id, now - AUTO_DIAGNOSE_WINDOW),
+                ).fetchone()
+            if owner is None or recent[0] > 0:
+                return
+            journal = JournalStore(self._c)
+            page = journal.list_entries(person_id=owner[0], harness_id=job.harness_id,
+                                        employee_id=job.employee_id, page_size=15)
+            question = f"работа «{job.duty_id}» упала с ошибкой: {error_text[:200]} — найди причину"
+            journal.append_entry(
+                person_id=owner[0], company_id=job.company_id, harness_id=job.harness_id,
+                kind="help.requested", employee_id=job.employee_id,
+                payload={"question": question, "auto": "true", "job_id": str(job.job_id)},
+            )
+            with self._c.transaction():
+                self._store.enqueue(
+                    employee=employee, duty_id="ask", trigger="ask",
+                    input={"text": diagnosis.prompt(question, diagnosis.digest(page.entries))[:4000],
+                           "diagnosis": True},
+                )
+        except Exception:  # noqa: BLE001 — авто-помощь не должна ронять runtime
+            log.exception("auto-diagnose for job %s skipped", job.job_id)
 
     def tick(self) -> TickResult:
         result = TickResult(enqueued=self.schedule())

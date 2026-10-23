@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
+import json
+
 import httpx
 from psycopg import Connection
 
@@ -135,14 +137,24 @@ class WorkforceService:
         """Пример-сотрудник в шаблон новой организации (ADR-030): роль из каталога, без LLM, через валидатор."""
         return self.draft_from_template(identity, template_id="sales-manager")
 
-    def draft_from_template(self, identity: Registration, *, template_id: str) -> dict[str, Any]:
-        """Готовая роль из каталога: без LLM, но тем же конвейером — валидатор → предложение → гейт куратора."""
+    def draft_from_template(self, identity: Registration, *, template_id: str,
+                            org: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Готовая роль из каталога: без LLM, но тем же конвейером — валидатор → предложение → гейт куратора.
+
+        Если у организации задан KPI (ADR-035), роль наследует его отдельной целью."""
         template = role_template(template_id)
         if template is None:
             raise ValueError(f"unknown role template: {template_id!r}")
+        raw = json.loads(template["draft"])
+        kpi = (org or {}).get("kpi", "")
+        if isinstance(kpi, str) and kpi.strip():
+            raw.setdefault("goals", []).append({
+                "text": f"Вклад роли в KPI организации: {kpi.strip()[:200]}",
+                "metric": "org_kpi", "target": None, "period": "month",
+            })
         self._store.ensure_researcher(company_id=identity.company_id, harness_id=identity.harness_id)
         return self._draft_from(identity, employee_id=uuid4(), kind="new",
-                                draft=parse_draft(template["draft"]), source="template")
+                                draft=parse_draft(json.dumps(raw, ensure_ascii=False)), source="template")
 
     def _draft_from(self, identity: Registration, *, employee_id: UUID, kind: str,
                     draft: Mapping[str, Any], source: str = "role_text") -> dict[str, Any]:

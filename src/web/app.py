@@ -44,7 +44,7 @@ JOURNAL_KINDS = {
     "adapter.call": "Вызов адаптера", "landscape.discovered": "Карта ландшафта", "auth.web.login": "Вход в кабинет",
     "auth.web.logout": "Выход из кабинета", "consent.external_llm": "Согласие на внешний LLM",
     "secret.stored": "Доступ сохранён", "landscape.discovery_failed": "Исследование не удалось",
-    "answer.blocked": "Ответ не выдан", "help.requested": "Запрос помощи/диагностики", "skill.published": "Навык опубликован", "skill.rejected": "Навык отклонён",
+    "answer.blocked": "Ответ не выдан", "help.requested": "Запрос помощи/диагностики", "org.updated": "Профиль организации обновлён", "skill.published": "Навык опубликован", "skill.rejected": "Навык отклонён",
     "skill.failed": "Навык не создан", "employee.paused": "Сотрудник на паузе", "employee.resumed": "Сотрудник возобновлён",
     "proposal.withdrawn": "Предложение заменено", "proposal.applied": "Согласие применено",
     "proposal.decision_denied": "Решение отклонено: не куратор",
@@ -68,6 +68,7 @@ NOTICES = {
     "examples": "Примеры процессов и проектов добавлены.",
     "resumed": "Сотрудник снова работает по расписанию.",
     "llm_saved": "Настройки LLM сохранены. Применятся после перезапуска харнесса.",
+    "org_saved": "Профиль организации сохранён. Новые роли будут наследовать KPI, процессы отрасли — первыми в каталоге.",
 }
 
 SECURITY_HEADERS = {
@@ -622,6 +623,33 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
             return await again(f"Проверьте форму: {body.get('detail', 'ошибка')}", 400)
         return await again("Сервис временно недоступен. Попробуйте позже.", 503)
 
+    # --- профиль организации (ADR-035) ----------------------------------------------------
+
+    @app.get("/organization")
+    async def organization(request: Request, notice: str = ""):
+        status, body = await api(request, "org.get")
+        if status != 200:
+            return message("Кабинет недоступен", "Сервис временно недоступен. Попробуйте позже.", 503)
+        return page("organization.html", org=body, csrf_token=csrf_of(request),
+                    notice=NOTICES.get(notice), error=None)
+
+    @app.post("/organization")
+    async def organization_save(request: Request):
+        fields = await form(request)
+        status, body = await api(request, "org.put",
+                                 {"industry": fields.get("industry", ""), "size": fields.get("size", ""),
+                                  "kpi": fields.get("kpi", "")}, csrf=fields.get("csrf_token", ""))
+        if status == 403:
+            return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
+        if status == 400:
+            _, current = await api(request, "org.get")
+            return page("organization.html", 400, org=current if isinstance(current, dict) else {},
+                        csrf_token=csrf_of(request), notice=None,
+                        error=f"Проверьте поля: {body.get('detail', 'ошибка')}")
+        if status != 200:
+            return message("Не сохранено", "Сервис временно недоступен. Попробуйте позже.", 503)
+        return RedirectResponse("/organization?notice=org_saved", status_code=303)
+
     # --- настройки LLM (ADR-033) ---------------------------------------------------------
 
     @app.get("/settings")
@@ -684,8 +712,16 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
         if status != 200:
             return message("Кабинет недоступен", "Сервис временно недоступен. Попробуйте позже.", 503)
         cat_status, cat = await api(request, "catalog.list")
+        org_status, org = await api(request, "org.get")
+        industry = org.get("industry", "") if org_status == 200 else ""
+        industries = org.get("industries", {}) if org_status == 200 else {}
+        templates = cat.get("processes", []) if cat_status == 200 else []
+        # процессы отрасли организации — первыми, затем универсальные, затем остальные
+        templates = sorted(templates, key=lambda t: (
+            0 if industry and t.get("industry") == industry else (1 if t.get("industry") == "all" else 2),
+            t.get("name", "")))
         return page("processes.html", processes=body.get("processes", []), csrf_token=csrf_of(request),
-                    catalog_processes=cat.get("processes", []) if cat_status == 200 else [],
+                    catalog_processes=templates, industries=industries, org_industry=industry,
                     notice=NOTICES.get(notice))
 
     @app.post("/processes/from-template")

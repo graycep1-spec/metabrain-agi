@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Организация — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Профиль организации</h1>
+  <p class="muted">Отрасль, размер и ключевые KPI наследуются вниз: новые роли получают KPI отдельной целью
+    (из каталога — сразу, из описания — модель учитывает в целях), а процессы вашей отрасли
+    показываются первыми в каталоге на экране «Процессы».</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/organization">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <label for="industry">Отрасль</label>
+    <select id="industry" name="industry">
+      {% for value, label in org.industries.items() %}
+      <option value="{{ value }}" {% if value == org.industry %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="size">Размер</label>
+    <select id="size" name="size">
+      {% for value, label in org.sizes.items() %}
+      <option value="{{ value }}" {% if value == org.size %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="kpi">Ключевые KPI организации</label>
+    <textarea id="kpi" name="kpi" maxlength="500"
+              placeholder="Например: выручка +20% за год; срок ответа клиенту — до 1 часа; доля повторных покупок — 40%">{{ org.kpi }}</textarea>
+
+    <div class="actions"><button class="button" type="submit">Сохранить</button></div>
+  </form>
+</div>
+<div class="card">
+  <h2>Как это работает</h2>
+  <p class="muted">Создайте роль из каталога на экране <a href="/">«Сотрудники»</a> — в её целях появится
+    «Вклад роли в KPI организации». Добавьте <a href="/processes">процессы вашей отрасли</a> из каталога
+    и прикрепите к ним сотрудников.</p>
+</div>
+{% endblock %}

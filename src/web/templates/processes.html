@@ -28,8 +28,9 @@
   <form method="post" action="/processes/from-template" class="actions">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <select name="template_id" aria-label="Процесс из каталога" style="max-width: 420px;">
-      {% for t in catalog_processes %}<option value="{{ t.id }}">{{ t.name }} — {{ t.purpose }}</option>{% endfor %}
+      {% for t in catalog_processes %}<option value="{{ t.id }}">{% if t.industry != 'all' %}[{{ industries.get(t.industry, t.industry) }}] {% endif %}{{ t.name }} — {{ t.purpose }}</option>{% endfor %}
     </select>
+    {% if org_industry %}<p class="muted">Первыми — процессы вашей отрасли ({{ industries.get(org_industry, org_industry) }}); сменить — в <a href="/organization">профиле организации</a>.</p>{% endif %}
     <button class="button" type="submit">Создать из каталога</button>
   </form>
   <h3>Или свой</h3>
