@@ -161,12 +161,40 @@ class Runtime:
             log.exception("job %s failed", job.job_id)
             with self._c.transaction():
                 self._store.fail_job(job_id=job.job_id, error=f"{type(error).__name__}: {error}")
+            if type(error).__name__ == "BudgetExceededError":
+                # Лимит исчерпан: ставим сотрудника на паузу, иначе расписание будет
+                # плодить падающие работы до конца суток. Куратор возобновит кнопкой.
+                self._pause_on_budget(job, employee, str(error))
+                return "failed"
             self._maybe_auto_diagnose(job, employee, f"{type(error).__name__}: {error}")
             return "failed"
+
         with self._c.transaction():
             self._store.finish_job(job_id=job.job_id, report=report)
         self._sink.deliver(job, report)
         return "done"
+
+    def _pause_on_budget(self, job: Job, employee: Employee, detail: str) -> None:
+        try:
+            with self._c.transaction():
+                paused = self._store.set_status(employee_id=job.employee_id, harness_id=job.harness_id,
+                                                source="active", target="paused")
+                owner = self._c.execute(
+                    "SELECT owner_person_id FROM harnesses WHERE id = %s", (job.harness_id,)
+                ).fetchone()
+            if not paused or owner is None:
+                return
+            from src.harness.journal import JournalStore
+
+            JournalStore(self._c).append_entry(
+                person_id=owner[0], company_id=job.company_id, harness_id=job.harness_id,
+                kind="employee.paused", employee_id=job.employee_id,
+                payload={"reason": "budget_exceeded", "detail": detail[:200],
+                         "title": getattr(employee, "title", "")},
+            )
+            log.warning("employee %s paused: budget exceeded", job.employee_id)
+        except Exception:  # noqa: BLE001 — пауза не должна ронять runtime
+            log.exception("pause on budget failed for %s", job.employee_id)
 
     def _maybe_auto_diagnose(self, job: Job, employee: Employee, error_text: str) -> None:
         """Упавшая работа зовёт диагноста сама (ADR-034): отдельная работа тем же роем.

@@ -83,3 +83,24 @@ CREATE INDEX IF NOT EXISTS llm_budget_reservations_expiry_idx
 
 CREATE INDEX IF NOT EXISTS llm_budget_reservations_scope_idx
     ON llm_budget_reservations (harness_id, employee_id, created_at);
+
+-- Кастомные подключения (C-6, подключения): запись каталога + секрет в vault.
+CREATE TABLE IF NOT EXISTS custom_connections (
+    connection_id UUID PRIMARY KEY,
+    company_id UUID NOT NULL,
+    harness_id UUID NOT NULL,
+    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+    kind TEXT NOT NULL DEFAULT 'custom',
+    target TEXT NOT NULL CHECK (length(trim(target)) > 0),
+    auth_type TEXT NOT NULL,
+    secret_ref TEXT,
+    allowed_roles JSONB NOT NULL DEFAULT '[]'::jsonb,
+    note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL CHECK (status IN ('configured', 'needs_credentials', 'disabled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    FOREIGN KEY (harness_id, company_id) REFERENCES harnesses (id, company_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS custom_connections_harness_idx
+    ON custom_connections (harness_id, created_at);

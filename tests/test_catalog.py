@@ -1,13 +1,11 @@
 """Каталог преднастроенных ролей/процессов, конвейер и диагност (минимум по спекам, ADR-029)."""
 
-from urllib.parse import urlencode
-
 import pytest
 
 from src.workforce.catalog import PROCESS_TEMPLATES, ROLE_TEMPLATES, listing
 from tests.support_harness import harness_env
 from tests.test_swarm import API_TOKEN, USER, FakeDeepSeek, api_for, connected_twin
-from tests.test_web_cabinet import FORM, csrf, logged_in, post
+from tests.test_web_cabinet import csrf, logged_in, post
 
 
 # --- каталог: каждая роль обязана проходить валидатор ----------------------------------------
@@ -168,11 +166,16 @@ def test_failed_job_calls_the_diagnost_once_per_window():
         job_id = runtime.enqueue(employee, duty_id="d1", trigger="event", input={"text": "работа"})
         assert runtime.run_job(job_id) == "failed"
 
-        help_count = lambda: env.connection.execute(
-            "SELECT count(*) FROM journal_entries WHERE kind='help.requested' AND payload->>'auto'='true'"
-        ).fetchone()[0]
-        diag_jobs = lambda: env.connection.execute(
-            "SELECT count(*) FROM wf_jobs WHERE input->>'diagnosis' = 'true'").fetchone()[0]
+        def help_count():
+            return env.connection.execute(
+                "SELECT count(*) FROM journal_entries WHERE kind='help.requested' AND payload->>'auto'='true'"
+            ).fetchone()[0]
+
+        def diag_jobs():
+            return env.connection.execute(
+                "SELECT count(*) FROM wf_jobs WHERE input->>'diagnosis' = 'true'"
+            ).fetchone()[0]
+
         assert help_count() == 1 and diag_jobs() == 1
 
         # повторное падение в окне — без второго вызова (троттл)
@@ -185,3 +188,46 @@ def test_failed_job_calls_the_diagnost_once_per_window():
             "SELECT job_id FROM wf_jobs WHERE input->>'diagnosis' = 'true' LIMIT 1").fetchone()[0]
         assert runtime.run_job(diag_job) == "failed"
         assert help_count() == 1 and diag_jobs() == 1
+
+
+# --- лавина падений при исчерпанном бюджете (инцидент 24.10) --------------------------------
+
+class _BudgetBurst:
+    def run(self, job, passport, steps):
+        from src.llm.connector import BudgetExceededError
+        raise BudgetExceededError("budget_usd_per_day.employee: limit 0.5; remaining 0; requested 0.01")
+
+
+def test_budget_exceeded_pauses_the_employee_instead_of_piling_up_failures():
+    """Иначе расписание плодит падающие работы до конца суток (было 171 за сутки на боевом стенде)."""
+    from src.workforce.reports import HarnessReportSink
+    from src.workforce.runtime import Runtime
+    from src.workforce.store import WorkforceStore
+    from tests.test_workforce import active_twin
+
+    with harness_env() as env:
+        me = env.register("a")
+        active_twin(env, me)
+        store = WorkforceStore(env.connection)
+        employee_id = env.connection.execute(
+            "SELECT employee_id FROM wf_employees WHERE kind <> 'researcher' LIMIT 1").fetchone()[0]
+        employee = store.get_employee(employee_id=employee_id, harness_id=me.harness_id)
+        runtime = Runtime(env.connection, handler=_BudgetBurst(), sink=HarnessReportSink(env.connection),
+                          clock=env.clock)
+
+        assert runtime.run_job(runtime.enqueue(employee, duty_id="d1", trigger="schedule",
+                                               input={"text": "работа"})) == "failed"
+
+        status = env.connection.execute(
+            "SELECT status FROM wf_employees WHERE employee_id = %s", (employee_id,)).fetchone()[0]
+        assert status == "paused"
+        entry = env.connection.execute(
+            "SELECT payload::text FROM journal_entries WHERE kind = 'employee.paused' "
+            "AND payload->>'reason' = 'budget_exceeded'").fetchone()
+        assert entry and "budget_usd_per_day" in entry[0]
+        # на паузе планировщик больше не создаёт работ — лавина остановлена
+        assert runtime.schedule() == 0
+
+        # диагноста по бюджету не зовём: чинить нечего, нужен лимит, а не правка паспорта
+        assert env.connection.execute(
+            "SELECT count(*) FROM journal_entries WHERE kind = 'help.requested'").fetchone()[0] == 0

@@ -1,7 +1,7 @@
 """T-37 (ADR-029): отладчик читает телеметрию → предложение self_improvement → согласие → применение."""
 
 import json
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 import httpx
@@ -20,7 +20,7 @@ from src.workforce.store import WorkforceStore
 from tests.support_harness import CONSENT_KEY, CONSENT_PUBLIC_KEY, harness_env
 from tests.test_catalog import _Failing
 from tests.test_web_auth import API_TOKEN, FakeTelegram, claims, make_auth, telegram_id
-from tests.test_web_cabinet import FORM, csrf, post
+from tests.test_web_cabinet import csrf, post
 from tests.test_workforce import active_twin
 
 

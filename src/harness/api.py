@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Collection, Mapping
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from hashlib import sha256
 import hmac
 import logging
@@ -19,7 +20,7 @@ from psycopg import Connection, errors
 from starlette.concurrency import run_in_threadpool
 
 from src.common.config import Settings
-from src.common.secrets import EnvSecretStore, SecretNotFoundError
+from src.common.secrets import EnvSecretStore
 from src.harness.journal import JournalStore
 from src.harness.proposals import (
     ConsentError,
@@ -53,7 +54,11 @@ from src.harness.llm_settings import (
 )
 from src.harness.llm_settings import validate as validate_llm_settings
 from src.landscape.service import LandscapeUnavailable, ResearcherService
+from src.landscape.catalog import catalog as connector_catalog
+from src.landscape.custom import CustomConnectionStore
 from src.llm.connector import BudgetExceededError
+from src.metabrain.policy import load_policy
+from src.workforce.flows import FlowService
 from src.workforce.improvement import ImprovementFlow
 from src.workforce.runtime import Runtime
 from src.workforce.planning import (
@@ -146,8 +151,14 @@ class C1Service:
         self._llm_settings = LLMSettingsStore(connection)
         # Профиль организации (ADR-035): отрасль/размер/KPI, наследуется ролями.
         self._org = OrgStore(connection)
+        # Кастомные подключения: запись каталога + секрет в vault.
+        self._custom = CustomConnectionStore(connection, vault=vault, journal=self._journal, clock=self._clock)
         # T-37: модуль самосовершенствования (ADR-029), только через гейт.
         self._improvement = improvement
+        # Преднастроенные сценарии (ADR-036): роль + процессы + прикрепления + задачи.
+        self._flows = (FlowService(connection, workforce=workforce, planning=self._planning,
+                                   journal=self._journal, clock=self._clock)
+                       if workforce is not None else None)
         schema = Path(__file__).with_name("api.sql").read_text(encoding="utf-8")
         with connection.transaction():
             connection.execute(schema, prepare=False)
@@ -169,6 +180,8 @@ class C1Service:
             "ask": self.ask,
             "catalog.list": self.list_catalog,
             "org.get": self.get_org,
+            "flow.start": self.start_flow,
+            "flow.status": self.flow_status,
             "improvement.scan": self.scan_improvement,
             "improvement.run": self.run_improvement,
             "org.put": self.put_org,
@@ -191,6 +204,9 @@ class C1Service:
             "planning.summary": self.planning_summary,
             "planning.seed_examples": self.planning_seed_examples,
             "landscape.map": self.get_landscape_map,
+            "connections.catalog": self.list_connector_catalog,
+            "connections.custom.list": self.list_custom_connections,
+            "connections.custom.create": self.create_custom_connection,
             "auth.web.start": self.web_start,
             "auth.web.callback": self.web_callback,
             "auth.web.bootstrap": self.web_bootstrap,
@@ -198,6 +214,9 @@ class C1Service:
             "settings.llm.get": self.get_llm_settings,
             "settings.llm.put": self.put_llm_settings,
             "settings.llm.test": self.test_llm_settings,
+            "settings.llm.usage": self.get_llm_usage,
+            "settings.metabrain.get": self.get_metabrain_setting,
+            "settings.metabrain.put": self.put_metabrain_setting,
         }
         handler = handlers.get(operation)
         if handler is None:
@@ -749,6 +768,25 @@ class C1Service:
         )
         return 201, {"secret_ref": secret_ref}
 
+    # --- каталог и кастомные подключения -------------------------------------------------
+
+    def list_connector_catalog(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        self._identity(payload)
+        return 200, {"groups": connector_catalog()}
+
+    def list_custom_connections(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        identity = self._identity(payload)
+        return 200, {"connections": self._custom.list(identity)}
+
+    def create_custom_connection(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        identity = self._identity(payload)
+        return 201, self._custom.create(
+            identity, name=payload.get("name"), kind=payload.get("kind", "custom"),
+            target=payload.get("target"), auth_type=payload.get("auth_type", "token"),
+            secret=payload.get("secret", ""), allowed_roles=payload.get("allowed_roles", ()),
+            note=payload.get("note", ""),
+        )
+
     # --- настройки LLM в кабинете (ADR-033) -------------------------------------------------------
 
     @staticmethod
@@ -951,6 +989,85 @@ class C1Service:
                                          "kpi_set": bool(org["kpi"])},
         )
         return 200, org
+
+    def get_metabrain_setting(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        identity = self._identity(payload)
+        org = self._org.get(identity.company_id)
+        return 200, {"enabled": org["metabrain_enabled"]}
+
+    def put_metabrain_setting(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        identity = self._identity(payload)
+        enabled = self._as_bool(payload.get("enabled"))
+        org = self._org.set_metabrain(identity.company_id, enabled=enabled, updated_by=identity.person_id)
+        self._journal.append_entry(
+            person_id=identity.person_id, company_id=identity.company_id, harness_id=identity.harness_id,
+            kind="metabrain.toggled", payload={"enabled": enabled},
+        )
+        return 200, {"enabled": org["metabrain_enabled"]}
+
+    def get_llm_usage(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Баланс и токены по локальному журналу llm_usage; ключ и провайдер не раскрываются."""
+        identity = self._identity(payload)
+        policy = load_policy()
+        limits = policy.get("limits", {})
+        install_limit = (limits.get("budget_usd_total") or {}).get("installation")
+        daily_limit = (limits.get("budget_usd_per_day") or {}).get("harness")
+        all_row = self._connection.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0), COALESCE(SUM(prompt_tokens), 0), "
+            "COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(total_tokens), 0) FROM llm_usage"
+        ).fetchone()
+        day_row = self._connection.execute(
+            """
+            SELECT COALESCE(SUM(cost_usd), 0), COALESCE(SUM(total_tokens), 0)
+            FROM llm_usage
+            WHERE harness_id = %s
+              AND created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+            """,
+            (str(identity.harness_id),),
+        ).fetchone()
+        spent = float(Decimal(all_row[0]))
+        spent_today = float(Decimal(day_row[0]))
+
+        def balance(limit: Any, used: float) -> float | None:
+            return None if limit is None else float(Decimal(str(limit)) - Decimal(str(used)))
+
+        return 200, {
+            "currency": "USD",
+            "installation": {
+                "limit_usd": None if install_limit is None else float(Decimal(str(install_limit))),
+                "spent_usd": spent,
+                "remaining_usd": balance(install_limit, spent),
+                "prompt_tokens": int(all_row[1]),
+                "completion_tokens": int(all_row[2]),
+                "total_tokens": int(all_row[3]),
+            },
+            "today": {
+                "limit_usd": None if daily_limit is None else float(Decimal(str(daily_limit))),
+                "spent_usd": spent_today,
+                "remaining_usd": balance(daily_limit, spent_today),
+                "total_tokens": int(day_row[1]),
+            },
+        }
+
+    def _require_flows(self) -> FlowService:
+        if self._flows is None:
+            raise NotImplementedError("flows require the workforce service")
+        return self._flows
+
+    def flow_status(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Развёрнутые сценарии и состояние их петли (гейт, находки улучшателя)."""
+        identity = self._identity(payload)
+        self._requested_harness(payload, identity.harness_id)
+        return 200, {"started": self._require_flows().status(identity)}
+
+    def start_flow(self, payload: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Развернуть сценарий целиком: роль → процессы → прикрепления → первые задачи (ADR-036)."""
+        identity = self._identity(payload)
+        self._requested_harness(payload, identity.harness_id)
+        template_id = self._required_text(payload, "template_id")
+        result = self._require_flows().start(identity, template_id=template_id,
+                                             org=self._org.get(identity.company_id))
+        return (422 if result.get("status") == "rejected" else 201), result
 
     def _require_improvement(self) -> ImprovementFlow:
         if self._improvement is None:

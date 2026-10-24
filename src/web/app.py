@@ -44,7 +44,7 @@ JOURNAL_KINDS = {
     "adapter.call": "Вызов адаптера", "landscape.discovered": "Карта ландшафта", "auth.web.login": "Вход в кабинет",
     "auth.web.logout": "Выход из кабинета", "consent.external_llm": "Согласие на внешний LLM",
     "secret.stored": "Доступ сохранён", "landscape.discovery_failed": "Исследование не удалось",
-    "answer.blocked": "Ответ не выдан", "help.requested": "Запрос помощи/диагностики", "org.updated": "Профиль организации обновлён", "self_improvement.proposed": "Улучшение от отладчика", "skill.published": "Навык опубликован", "skill.rejected": "Навык отклонён",
+    "answer.blocked": "Ответ не выдан", "help.requested": "Запрос помощи/диагностики", "org.updated": "Профиль организации обновлён", "self_improvement.proposed": "Улучшение от отладчика", "flow.started": "Сценарий развёрнут", "skill.published": "Навык опубликован", "skill.rejected": "Навык отклонён",
     "skill.failed": "Навык не создан", "employee.paused": "Сотрудник на паузе", "employee.resumed": "Сотрудник возобновлён",
     "proposal.withdrawn": "Предложение заменено", "proposal.applied": "Согласие применено",
     "proposal.decision_denied": "Решение отклонено: не куратор",
@@ -66,10 +66,13 @@ NOTICES = {
     "task_created": "Задача добавлена.",
     "task_updated": "Задача обновлена.",
     "examples": "Примеры процессов и проектов добавлены.",
+    "metabrain_saved": "Настройка мета-мозга сохранена.",
+    "custom_saved": "Кастомное подключение сохранено.",
     "resumed": "Сотрудник снова работает по расписанию.",
     "llm_saved": "Настройки LLM сохранены. Применятся после перезапуска харнесса.",
     "org_saved": "Профиль организации сохранён. Новые роли будут наследовать KPI, процессы отрасли — первыми в каталоге.",
     "improved": "Отладчик предложил улучшения — подтвердите их ниже.",
+    "flow_started": "Сценарий развёрнут: процессы и задачи созданы, паспорт роли ждёт вашего согласия ниже.",
 }
 
 SECURITY_HEADERS = {
@@ -600,11 +603,17 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
         code, body = await api(request, "landscape.map")
         if code != 200:
             return message("Кабинет недоступен", "Сервис временно недоступен. Попробуйте позже.", 503)
+        _, llm = await api(request, "settings.llm.get")
+        _, catalog = await api(request, "connections.catalog")
+        _, custom = await api(request, "connections.custom.list")
         systems = body.get("systems", [])
         # Секрет из формы в страницу не возвращается — поле доступа всегда пустое.
         return page("connections.html", status, systems=systems, landscape=body.get("map", {}),
                     connectable=[s["system"] for s in systems if s["status"] != "active"], selected=selected,
                     connect_request_id=connect_request_id, error=error, system_statuses=SYSTEM_STATUSES,
+                    llm=llm if isinstance(llm, dict) else {},
+                    catalog=(catalog or {}).get("groups", []) if isinstance(catalog, dict) else [],
+                    custom=(custom or {}).get("connections", []) if isinstance(custom, dict) else [],
                     csrf_token=csrf_of(request))
 
     @app.get("/connections")
@@ -645,6 +654,62 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
             return await again(f"Проверьте форму: {body.get('detail', 'ошибка')}", 400)
         return await again("Сервис временно недоступен. Попробуйте позже.", 503)
 
+    @app.post("/connections/custom")
+    async def custom_connection(request: Request):
+        fields = await form(request)
+        status, body = await api(
+            request, "connections.custom.create",
+            {"name": fields.get("name", ""), "kind": fields.get("kind", "custom"),
+             "target": fields.get("target", ""), "auth_type": fields.get("auth_type", "token"),
+             "secret": fields.get("secret", ""), "allowed_roles": fields.get("allowed_roles", ""),
+             "note": fields.get("note", "")},
+            csrf=fields.get("csrf_token", ""),
+        )
+        if status == 201:
+            return RedirectResponse("/connections?notice=custom_saved", status_code=303)
+        if status == 403:
+            return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
+        if status == 503 and body.get("error") == "secret_store_unavailable":
+            return message("Хранилище доступов не настроено", "Задайте SECRET_STORE_KEY и повторите.", 503,
+                           {"href": "/connections", "label": "Назад"}, csrf_token=csrf_of(request))
+        return message("Подключение не сохранено", body.get("detail", "Проверьте поля."), 400,
+                       {"href": "/connections", "label": "Назад"}, csrf_token=csrf_of(request))
+
+    # --- преднастроенные сценарии (ADR-036) -----------------------------------------------
+
+    @app.get("/flows")
+    async def flows(request: Request, notice: str = ""):
+        cat_status, cat = await api(request, "catalog.list")
+        if cat_status != 200:
+            return message("Кабинет недоступен", "Сервис временно недоступен. Попробуйте позже.", 503)
+        org_status, org = await api(request, "org.get")
+        industry = org.get("industry", "") if org_status == 200 else ""
+        templates = sorted(cat.get("flows", []),
+                           key=lambda t: (0 if industry and t.get("industry") == industry else 1, t["name"]))
+        started_status, started = await api(request, "flow.status")
+        return page("flows.html", flows=templates, started=started.get("started", []) if started_status == 200 else [],
+                    industries=org.get("industries", {}) if org_status == 200 else {},
+                    org_industry=industry, csrf_token=csrf_of(request), notice=NOTICES.get(notice))
+
+    @app.post("/flows/start")
+    async def flow_start(request: Request):
+        fields = await form(request)
+        template_id = fields.get("template_id", "").strip()
+        if not template_id:
+            return RedirectResponse("/flows", status_code=303)
+        status, body = await api(request, "flow.start", {"template_id": template_id},
+                                 csrf=fields.get("csrf_token", ""))
+        if status == 201:
+            return RedirectResponse("/proposals?notice=flow_started", status_code=303)
+        if status == 403:
+            return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
+        if status == 422:
+            reasons = "; ".join(body.get("reasons", [])) or "паспорт роли отклонён"
+            return message("Сценарий не развёрнут", f"Валидатор не пропустил паспорт роли: {reasons}", 422,
+                           {"href": "/flows", "label": "Назад"}, csrf_token=csrf_of(request))
+        return message("Сценарий не развёрнут", "Сервис временно недоступен. Попробуйте позже.", 503,
+                       {"href": "/flows", "label": "Назад"}, csrf_token=csrf_of(request))
+
     # --- профиль организации (ADR-035) ----------------------------------------------------
 
     @app.get("/organization")
@@ -679,8 +744,24 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
         status, body = await api(request, "settings.llm.get")
         if status != 200:
             return message("Кабинет недоступен", "Сервис временно недоступен. Попробуйте позже.", 503)
+        _, usage = await api(request, "settings.llm.usage")
+        _, metabrain = await api(request, "settings.metabrain.get")
         return page("settings.html", llm=body, csrf_token=csrf_of(request),
-                    notice=NOTICES.get(notice), test=None, error=None)
+                    notice=NOTICES.get(notice), test=None, error=None,
+                    usage=usage if isinstance(usage, dict) else None,
+                    metabrain=metabrain if isinstance(metabrain, dict) else None)
+
+    async def settings_view(request: Request, *, status: int = 200, llm: dict[str, Any] | None = None,
+                            test: dict[str, Any] | None = None, error: str | None = None) -> HTMLResponse:
+        if llm is None:
+            _, cfg = await api(request, "settings.llm.get")
+            llm = cfg if isinstance(cfg, dict) else {}
+        _, usage = await api(request, "settings.llm.usage")
+        _, metabrain = await api(request, "settings.metabrain.get")
+        return page("settings.html", status, llm=llm, csrf_token=csrf_of(request), notice=None,
+                    test=test, error=error,
+                    usage=usage if isinstance(usage, dict) else None,
+                    metabrain=metabrain if isinstance(metabrain, dict) else None)
 
     @app.post("/settings")
     async def settings_save(request: Request):
@@ -706,11 +787,24 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
             cfg.update({"provider": payload["provider"], "api_base": payload["api_base"],
                         "model_main": payload["model_main"], "model_judge": payload["model_judge"],
                         "dlp_enabled": fields.get("dlp_enabled", "") != ""})
-            return page("settings.html", 400, llm=cfg, csrf_token=csrf_of(request),
-                        error=f"Проверьте поля: {body.get('detail', 'ошибка')}", test=None, notice=None)
+            return await settings_view(request, status=400, llm=cfg,
+                                       error=f"Проверьте поля: {body.get('detail', 'ошибка')}")
         if status != 200:
             return message("Не сохранено", "Сервис временно недоступен. Попробуйте позже.", 503)
         return RedirectResponse("/settings?notice=llm_saved", status_code=303)
+
+    @app.post("/settings/metabrain")
+    async def settings_metabrain(request: Request):
+        fields = await form(request)
+        enabled = fields.get("enabled") == "true"
+        status, body = await api(request, "settings.metabrain.put", {"enabled": enabled},
+                                 csrf=fields.get("csrf_token", ""))
+        if status == 200:
+            return RedirectResponse("/settings?notice=metabrain_saved", status_code=303)
+        if status == 403:
+            return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
+        return message("Не сохранено", "Сервис временно недоступен. Попробуйте позже.", 503,
+                       {"href": "/settings", "label": "Назад"}, csrf_token=csrf_of(request))
 
     @app.post("/settings/test")
     async def settings_test(request: Request):
@@ -721,10 +815,7 @@ def create_app(harness: HarnessCall, *, web_base_url: str, bot_username: str = "
                 return message("Проверка выключена", "Настройка LLM из кабинета отключена на этой установке.", 403,
                                {"href": "/settings", "label": "Назад"}, csrf_token=csrf_of(request))
             return message("Действие отклонено", "Не прошла проверка безопасности формы. Обновите страницу.", 403)
-        cfg_status, cfg = await api(request, "settings.llm.get")
-        return page("settings.html", llm=cfg if cfg_status == 200 else {}, csrf_token=csrf_of(request),
-                    test=body if status == 200 else {"ok": False, "detail": "Проверка недоступна"},
-                    error=None, notice=None)
+        return await settings_view(request, test=body if status == 200 else {"ok": False, "detail": "Проверка недоступна"})
 
     # --- процессы и проекты (C-6, планирование) ------------------------------------------
 

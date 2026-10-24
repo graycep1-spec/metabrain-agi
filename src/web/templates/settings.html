@@ -1,82 +1,94 @@
 {% extends "base.html" %}
-{% block title %}Настройки LLM — MetaBrain{% endblock %}
+{% block title %}Настройки — MetaBrain{% endblock %}
 {% block content %}
 <div class="card">
-  <h1>Настройки LLM</h1>
-  <p class="muted">Какая модель отвечает и где она крутится. Для коробки в контуре заказчика — локальная модель;
-    на облаке по умолчанию DeepSeek. Маршруты ролей, цены и лимиты заданы политикой и здесь не меняются.</p>
-  {% if error %}<p class="error">{{ error }}</p>{% endif %}
-  {% if test %}
-    <p><span class="tag {{ 'ok' if test.ok else 'danger' }}">{{ 'подключение ок' if test.ok else 'нет подключения' }}</span>
-       {{ test.detail }}</p>
-  {% endif %}
-  <p class="muted">
-    Источник: {{ 'заданы в кабинете' if llm.source == 'cabinet' else 'из окружения установки' }} ·
-    Ключ: {% if llm.key_present %}задан ({{ 'хранилище' if llm.key_source == 'vault' else 'окружение' }}){% else %}не задан{% endif %} ·
-    DLP: <span class="tag {{ 'ok' if llm.dlp_enabled else 'warn' }}">{{ 'включён' if llm.dlp_enabled else 'выключен' }}</span>
+  <h1>Внешняя модель LLM</h1>
+  <p>
+    {% if llm.key_present %}<span class="tag ok">активно</span>{% else %}<span class="tag danger">не настроено</span>{% endif %}
+    <span class="muted">{{ 'DeepSeek' if llm.provider == 'deepseek' else 'Локальная модель' }} · {{ llm.model_main }}</span>
   </p>
+  <table>
+    <tbody>
+      <tr><td class="muted">Адрес API</td><td><code>{{ llm.api_base }}</code></td></tr>
+      <tr><td class="muted">Модель</td><td><code>{{ llm.model_main }}</code>{% if llm.model_judge and llm.model_judge != llm.model_main %} · критик <code>{{ llm.model_judge }}</code>{% endif %}</td></tr>
+      <tr><td class="muted">Ключ</td><td>{% if llm.key_present %}<code>sk-••••••••</code> <span class="muted">({{ 'хранилище' if llm.key_source == 'vault' else 'окружение' }})</span>{% else %}<span class="error">не задан</span>{% endif %}</td></tr>
+      <tr><td class="muted">DLP</td><td><span class="tag {{ 'ok' if llm.dlp_enabled else 'warn' }}">{{ 'включён' if llm.dlp_enabled else 'выключен' }}</span></td></tr>
+    </tbody>
+  </table>
+  {% if test %}
+    <p><span class="tag {{ 'ok' if test.ok else 'danger' }}">{{ 'подключение ок' if test.ok else 'нет подключения' }}</span> {{ test.detail }}</p>
+  {% endif %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+</div>
+
+{% if usage %}
+<div class="card">
+  <h2>Баланс и токены</h2>
+  <table>
+    <tbody>
+      <tr>
+        <td class="muted">Установка</td>
+        <td>{{ "%.2f"|format(usage.installation.limit_usd) if usage.installation.limit_usd is not none else "—" }} $ лимит ·
+            {{ "%.4f"|format(usage.installation.spent_usd) }} $ потрачено ·
+            <strong>{{ "%.4f"|format(usage.installation.remaining_usd) if usage.installation.remaining_usd is not none else "—" }} $ остаток</strong></td>
+      </tr>
+      <tr><td class="muted">Токены</td><td>{{ usage.installation.prompt_tokens }} вход · {{ usage.installation.completion_tokens }} выход · {{ usage.installation.total_tokens }} всего</td></tr>
+      <tr>
+        <td class="muted">Сегодня (харнесс)</td>
+        <td>{{ "%.2f"|format(usage.today.limit_usd) if usage.today.limit_usd is not none else "—" }} $ лимит ·
+            {{ "%.4f"|format(usage.today.spent_usd) }} $ потрачено ·
+            {{ "%.4f"|format(usage.today.remaining_usd) if usage.today.remaining_usd is not none else "—" }} $ остаток ·
+            {{ usage.today.total_tokens }} токенов</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Мета-мозг</h2>
+  <form method="post" action="/settings/metabrain">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label style="font-weight:500; display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" name="enabled" value="true" style="width:auto;" {% if metabrain and metabrain.enabled %}checked{% endif %}>
+      Подключать мета-мозг — получать новейшие бизнес-инсайды, роли и знания
+    </label>
+    <div class="actions"><button class="button secondary" type="submit">Сохранить</button></div>
+  </form>
 </div>
 
 {% if llm.editable %}
-<div class="card">
-  <h2>Изменить</h2>
-  <p class="muted">Изменения вступят в силу после перезапуска харнесса.</p>
+<details class="card">
+  <summary><strong>Изменить подключение</strong></summary>
   <form method="post" action="/settings">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-
     <label for="provider">Провайдер</label>
     <select id="provider" name="provider">
       <option value="deepseek" {% if llm.provider == 'deepseek' %}selected{% endif %}>DeepSeek (внешний)</option>
       <option value="local" {% if llm.provider == 'local' %}selected{% endif %}>Локальная модель (в контуре)</option>
     </select>
-
-    <label for="api_base">Адрес API (OpenAI-совместимый)</label>
-    <input type="text" id="api_base" name="api_base" value="{{ llm.api_base or '' }}"
-           placeholder="https://api.deepseek.com или http://vllm:8000/v1" autocomplete="off" required>
-
-    <label for="model_main">Модель для основной работы</label>
+    <label for="api_base">Адрес API</label>
+    <input type="text" id="api_base" name="api_base" value="{{ llm.api_base or '' }}" autocomplete="off" required>
+    <label for="model_main">Модель</label>
     <input type="text" id="model_main" name="model_main" value="{{ llm.model_main or '' }}" autocomplete="off" required>
-
-    <label for="model_judge">Модель для проверки (критик)</label>
-    <input type="text" id="model_judge" name="model_judge" value="{{ llm.model_judge or '' }}" autocomplete="off"
-           placeholder="можно оставить пустым — тогда как основная">
-
-    <label for="api_key">Ключ API</label>
+    <label for="model_judge">Модель критика</label>
+    <input type="text" id="model_judge" name="model_judge" value="{{ llm.model_judge or '' }}" autocomplete="off">
+    <label for="api_key">Новый ключ</label>
     <input type="password" id="api_key" name="api_key" autocomplete="off"
-           placeholder="{% if llm.key_present %}оставьте пустым, чтобы не менять{% else %}введите ключ провайдера{% endif %}">
-
-    <label style="font-weight:500; margin-top:14px;">
-      <input type="checkbox" name="dlp_enabled" value="true" style="width:auto;"
-             {% if llm.dlp_enabled %}checked{% endif %}>
-      Фильтр утечек (DLP) перед отправкой наружу
+           placeholder="{% if llm.key_present %}оставьте пустым, чтобы не менять{% else %}введите ключ{% endif %}">
+    <label style="font-weight:500;">
+      <input type="checkbox" name="dlp_enabled" value="true" style="width:auto;" {% if llm.dlp_enabled %}checked{% endif %}>
+      DLP перед внешней моделью
     </label>
-    <p class="muted">Для внешнего провайдера DLP обязателен — выключить можно только для локальной модели.</p>
-
-    <div class="actions"><button class="button" type="submit">Сохранить</button></div>
+    <div class="actions">
+      <button class="button" type="submit">Сохранить</button>
+      <button class="button secondary" type="submit" formaction="/settings/test" formnovalidate>Проверить</button>
+    </div>
   </form>
-</div>
-
-<div class="card">
-  <h2>Проверить подключение</h2>
-  <p class="muted">Проверит текущие сохранённые настройки: адрес, ключ и наличие моделей. Данные не отправляются.</p>
-  <form method="post" action="/settings/test">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="actions"><button class="button secondary" type="submit">Проверить</button></div>
-  </form>
-</div>
+</details>
 {% else %}
 <div class="card">
-  <h2>Текущие настройки</h2>
-  <table>
-    <tbody>
-      <tr><td class="muted">Провайдер</td><td>{{ 'DeepSeek' if llm.provider == 'deepseek' else 'Локальная модель' }}</td></tr>
-      <tr><td class="muted">Адрес API</td><td><code>{{ llm.api_base }}</code></td></tr>
-      <tr><td class="muted">Модель (работа)</td><td><code>{{ llm.model_main }}</code></td></tr>
-      <tr><td class="muted">Модель (критик)</td><td><code>{{ llm.model_judge or llm.model_main }}</code></td></tr>
-    </tbody>
-  </table>
-  <p class="muted">Редактирование из кабинета выключено на этой установке. Менять настройки — через
-    <code>install.sh configure</code> или переменную <code>LLM_SETTINGS_EDITABLE</code>.</p>
+  <p class="muted">Редактирование из кабинета выключено на этой установке. Менять — через <code>install.sh configure</code>.</p>
 </div>
 {% endif %}
 {% endblock %}

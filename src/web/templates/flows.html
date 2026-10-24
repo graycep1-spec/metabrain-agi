@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Сценарии — MetaBrain{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>Готовые сценарии</h1>
+  <p class="muted">Сценарий разворачивает связку целиком: роль из каталога, процессы, прикрепления и первые
+    задачи. Паспорт роли уходит вам на согласование — после него сотрудник начинает работать по расписанию,
+    а улучшатель подхватывает его телеметрию и приносит улучшения.</p>
+  {% if org_industry %}<p class="muted">Первым — сценарий вашей отрасли ({{ industries.get(org_industry, org_industry) }}); сменить — в <a href="/organization">профиле организации</a>.</p>{% endif %}
+</div>
+
+{% for f in flows %}
+<div class="card">
+  <h2>{{ f.name }} <span class="tag">{{ industries.get(f.industry, f.industry) }}</span></h2>
+  <p>{{ f.summary }}</p>
+  <table>
+    <tbody>
+      <tr><td class="muted">Сотрудник</td><td>{{ f.role_title }}</td></tr>
+      <tr><td class="muted">Процессы</td><td>{{ f.processes | join(" · ") }}</td></tr>
+      <tr><td class="muted">Первые задачи</td><td>{{ f.tasks }}</td></tr>
+    </tbody>
+  </table>
+  <form method="post" action="/flows/start">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="template_id" value="{{ f.id }}">
+    <div class="actions"><button class="button" type="submit">Развернуть сценарий</button></div>
+  </form>
+</div>
+{% endfor %}
+
+{% if started %}
+<div class="card">
+  <h2>Развёрнутые сценарии</h2>
+  <table>
+    <thead><tr><th>Сценарий</th><th>Сотрудник</th><th>Состояние</th><th>Улучшения</th></tr></thead>
+    <tbody>
+    {% for s in started %}
+      <tr>
+        <td>{{ s.name }}</td>
+        <td><a href="/employees/{{ s.employee_id }}">{{ s.role_title }}</a></td>
+        <td>
+          {% if s.pending %}<a href="/proposals"><span class="tag warn">ждёт согласия · {{ s.pending }}</span></a>
+          {% elif s.employee_status == "active" %}<span class="tag ok">работает</span>
+          {% else %}<span class="tag">{{ s.employee_status }}</span>{% endif %}
+        </td>
+        <td>
+          {% if s.improvements %}<a href="/proposals"><span class="tag">предложено: {{ s.improvements }}</span></a>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">Петля замыкается сама: работа → телеметрия → улучшатель находит повторяющиеся проблемы →
+    приносит вам улучшение на согласование. Проверить вручную — на экране <a href="/">«Сотрудники»</a>.</p>
+</div>
+{% endif %}
+{% endblock %}

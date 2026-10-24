@@ -198,6 +198,16 @@ class TelegramAdapter:
         channel_user_id: str,
         invite: str,
     ) -> TelegramReply:
+        # Уже зарегистрированному /start не предлагает регистрацию заново: повторное
+        # person.register падало бы с already_registered и невнятной ошибкой.
+        if await self._registered(channel_user_id):
+            text = ("Вы уже зарегистрированы — харнесс готов.\n"
+                    "Опишите роль: /role <что вы делаете>\n"
+                    "Пригласить коллегу: /invite · Подключить систему: /connect · Карта: /map")
+            if invite:
+                text = ("Вы уже состоите в организации, приглашение не нужно.\n"
+                        "Чтобы перейти в другую организацию, обратитесь к её куратору.")
+            return TelegramReply(text)
         token = invite if invite else "-"
         return TelegramReply(
             "Для регистрации нужно согласие на обработку запросов внешней "
@@ -207,6 +217,16 @@ class TelegramAdapter:
                 InlineButton("Отказаться", "register:decline"),
             ),
         )
+
+    async def _registered(self, channel_user_id: str) -> bool:
+        """Лёгкая проверка регистрации (без модели): employee.list требует зарегистрированной личности."""
+        try:
+            await self._api.call("employee.list", {"channel_user_id": channel_user_id})
+        except C1APIError as error:
+            if error.code == "registration_required":
+                return False
+            raise
+        return True
 
     async def _draft_role(
         self,
@@ -395,6 +415,8 @@ class TelegramAdapter:
         messages = {
             "external_llm_consent_required": "Для регистрации нужно сначала дать согласие.",
             "invalid_invite": "Ссылка приглашения недействительна или истекла.",
+            "already_registered": "Вы уже зарегистрированы — харнесс готов. "
+                                  "Опишите роль командой /role или пригласите коллегу через /invite.",
             "registration_required": "Сначала выполните /start и завершите регистрацию.",
             "forbidden_harness": "У вас нет доступа к этому харнессу.",
             "not_curator": "У вас нет прав решать это предложение.",

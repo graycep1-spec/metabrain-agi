@@ -2,7 +2,6 @@
 
 from collections.abc import Mapping
 from datetime import timedelta
-from functools import partial
 import os
 from typing import Any
 
@@ -15,6 +14,7 @@ from src.common.secrets import EnvSecretStore
 from src.harness.journal import JournalStore
 from src.harness.llm_settings import overlay_settings
 from src.harness.llm_usage import PostgresBudgetLedger
+from src.harness.organization import OrgStore
 from src.harness.proposals import ProposalStore
 from src.harness.store import HarnessStore
 from src.harness.vault import SecretStore, build_vault
@@ -134,10 +134,17 @@ def build_metabrain(source: Mapping[str, str]) -> HttpMetabrainClient | None:
 def build_swarm(connection: Connection, settings: Settings, secret_store: EnvSecretStore, *, policy, validator,
                 proposals: ProposalStore, journal: JournalStore, researcher: ResearcherService,
                 metabrain: HttpMetabrainClient | None = None) -> SwarmHandler:
+    skills_provider = None
+    if metabrain is not None:
+        def skills_provider(company_id, harness_id, limit=5):
+            # Галочка «Мета-мозг» в настройках: выключена — новые инсайды и знания не подмешиваются.
+            if not OrgStore(connection).get(company_id)["metabrain_enabled"]:
+                return []
+            return visible_skills(metabrain, company_id=company_id, harness_id=harness_id, limit=limit)
     return SwarmHandler(
         connection, connector=build_connector(policy, settings, connection, secret_store), validator=validator,
         collect=researcher.collect_facts, proposals=proposals, journal=journal,
-        skills=partial(visible_skills, metabrain) if metabrain is not None else None,
+        skills=skills_provider,
     )
 
 

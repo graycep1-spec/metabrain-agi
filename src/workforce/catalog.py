@@ -180,6 +180,55 @@ PROCESS_TEMPLATES: list[dict[str, Any]] = [
 ]
 
 
+# Готовый сценарий: роль + процессы + прикрепления + первые задачи одной кнопкой.
+# Замыкает петлю: процесс → сотрудник → работа → телеметрия → улучшатель → гейт куратора.
+FLOW_TEMPLATES: list[dict[str, Any]] = [
+    {
+        "id": "sales-quotes",
+        "industry": "sales",
+        "name": "Продажи: от заявки до КП",
+        "summary": "Менеджер по продажам разбирает заявки, готовит КП и держит воронку в актуальном виде.",
+        "role": "sales-manager",
+        "steps": [
+            {"process": "quote", "role_in_process": "исполнитель",
+             "tasks": ["Подготовить КП по первой заявке", "Сверить остатки и цены по прайсу"]},
+            {"process": "pipeline", "role_in_process": "исполнитель",
+             "tasks": ["Проверить зависшие сделки за неделю"]},
+        ],
+    },
+    {
+        "id": "support-line",
+        "industry": "services",
+        "name": "Услуги: линия поддержки клиентов",
+        "summary": "Специалист поддержки разбирает обращения и рекламации, собирает обратную связь после услуги.",
+        "role": "support",
+        "steps": [
+            {"process": "complaint", "role_in_process": "исполнитель",
+             "tasks": ["Разобрать очередь обращений", "Подготовить ответ по спорной рекламации"]},
+            {"process": "nps", "role_in_process": "исполнитель",
+             "tasks": ["Собрать оценки за прошедшую неделю"]},
+        ],
+    },
+    {
+        "id": "supply-control",
+        "industry": "logistics",
+        "name": "Логистика: отгрузки и сроки поставок",
+        "summary": "Менеджер по закупкам ведёт отгрузки и следит за сроками доставки, срывы поднимает куратору.",
+        "role": "procurement",
+        "steps": [
+            {"process": "shipping", "role_in_process": "исполнитель",
+             "tasks": ["Подготовить документы по ближайшей отгрузке"]},
+            {"process": "delivery", "role_in_process": "исполнитель",
+             "tasks": ["Проверить доставки в пути", "Поднять куратору срывы сроков"]},
+        ],
+    },
+]
+
+
+def flow_template(template_id: Any) -> dict[str, Any] | None:
+    return next((t for t in FLOW_TEMPLATES if t["id"] == template_id), None)
+
+
 def role_template(template_id: Any) -> dict[str, Any] | None:
     return next((t for t in ROLE_TEMPLATES if t["id"] == template_id), None)
 
@@ -194,4 +243,11 @@ def listing() -> dict[str, Any]:
         "roles": [{"id": t["id"], "title": t["title"], "summary": t["summary"]} for t in ROLE_TEMPLATES],
         "processes": [{"id": t["id"], "name": t["name"], "purpose": t["purpose"],
                        "industry": t.get("industry", "all")} for t in PROCESS_TEMPLATES],
+        "flows": [{
+            "id": t["id"], "name": t["name"], "summary": t["summary"], "industry": t["industry"],
+            "role_title": (role_template(t["role"]) or {}).get("title", t["role"]),
+            "processes": [(process_template(s["process"]) or {}).get("name", s["process"])
+                          for s in t["steps"]],
+            "tasks": sum(len(s["tasks"]) for s in t["steps"]),
+        } for t in FLOW_TEMPLATES],
     }

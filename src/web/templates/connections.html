@@ -3,6 +3,104 @@
 {% block content %}
 <div class="card">
   <h1>Подключения</h1>
+  <p class="muted">Внешняя модель, кастомные системы и типовые коннекторы. Секреты хранятся только в vault; в кабинете — маска.</p>
+</div>
+
+<div class="card">
+  <h2>Внешняя модель LLM <span class="tag {{ 'ok' if llm.key_present else 'danger' }}">{{ 'активно' if llm.key_present else 'не настроено' }}</span></h2>
+  <table>
+    <tbody>
+      <tr><td class="muted">Провайдер</td><td>{{ 'DeepSeek' if llm.provider == 'deepseek' else 'Локальная модель' }}</td></tr>
+      <tr><td class="muted">Модель</td><td><code>{{ llm.model_main or '—' }}</code></td></tr>
+      <tr><td class="muted">Ключ</td><td>{% if llm.key_present %}<code>sk-••••••••</code> <span class="muted">({{ 'хранилище' if llm.key_source == 'vault' else 'окружение' }})</span>{% else %}<span class="error">не задан</span>{% endif %}</td></tr>
+      <tr><td class="muted">DLP</td><td><span class="tag {{ 'ok' if llm.dlp_enabled else 'warn' }}">{{ 'включён' if llm.dlp_enabled else 'выключен' }}</span></td></tr>
+    </tbody>
+  </table>
+  <div class="actions"><a class="button secondary" href="/settings">Настроить LLM</a></div>
+</div>
+
+<div class="card">
+  <h2>Кастомное подключение</h2>
+  <p class="muted">Для системы, которой нет в каталоге. Укажите хост/URL и способ входа; секрет уйдёт в vault и больше не покажется.</p>
+  <form method="post" action="/connections/custom">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="name">Название</label>
+    <input id="name" name="name" type="text" maxlength="200" required placeholder="Например: внутренний CRM">
+    <label for="kind">Тип</label>
+    <select id="kind" name="kind">
+      <option value="custom">Другое / кастомное</option>
+      {% for group in catalog %}
+      <optgroup label="{{ group.title }}">
+        {% for c in group.connectors %}<option value="{{ c.id }}">{{ c.name }} · {{ c.kind }}</option>{% endfor %}
+      </optgroup>
+      {% endfor %}
+    </select>
+    <label for="target">Адрес или хост</label>
+    <input id="target" name="target" type="text" maxlength="500" required placeholder="ldap://dc.example.local:389, ssh://host:22, https://api.example">
+    <label for="auth_type">Способ входа</label>
+    <select id="auth_type" name="auth_type">
+      <option value="token">API-токен</option>
+      <option value="technical_account">Техническая учётная запись</option>
+      <option value="oauth">OAuth2</option>
+      <option value="ssh_key">SSH-ключ</option>
+      <option value="password">Логин и пароль</option>
+    </select>
+    <label for="secret">Секрет (логин/пароль, токен или ключ)</label>
+    <input id="secret" name="secret" type="password" autocomplete="off" placeholder="Оставьте пустым, если добавите позже">
+    <label for="allowed_roles">Кому разрешено (роли через запятую)</label>
+    <input id="allowed_roles" name="allowed_roles" type="text" value="Куратор, ИТ-администратор" maxlength="500">
+    <label for="note">Политика / примечание</label>
+    <input id="note" name="note" type="text" maxlength="1000" placeholder="Например: только чтение, запись — по согласию">
+    <div class="actions"><button class="button" type="submit">Сохранить подключение</button></div>
+  </form>
+</div>
+
+{% if custom %}
+<div class="card">
+  <h2>Мои кастомные подключения</h2>
+  <table>
+    <thead><tr><th>Название</th><th>Тип</th><th>Адрес</th><th>Вход</th><th>Секрет</th><th>Роли</th><th>Статус</th></tr></thead>
+    <tbody>
+    {% for c in custom %}
+      <tr>
+        <td>{{ c.name }}{% if c.note %}<br><span class="muted">{{ c.note }}</span>{% endif %}</td>
+        <td>{{ c.kind }}</td>
+        <td><code>{{ c.target }}</code></td>
+        <td>{{ c.auth_type }}</td>
+        <td><code>{{ c.secret_masked }}</code></td>
+        <td>{{ c.allowed_roles | join(", ") or "—" }}</td>
+        <td><span class="tag {{ 'ok' if c.status == 'configured' else 'warn' }}">{{ 'настроено' if c.status == 'configured' else 'нужен секрет' }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% for group in catalog %}
+<div class="card">
+  <h2>{{ group.title }}</h2>
+  <p class="muted">{{ group.description }}</p>
+  <table>
+    <thead><tr><th>Коннектор</th><th>Вход</th><th>Разрешено</th><th>Запрещено</th><th></th></tr></thead>
+    <tbody>
+    {% for c in group.connectors %}
+      <tr>
+        <td><b>{{ c.name }}</b> <span class="tag">{{ c.kind }}</span>{% if c.source == 'scout' %} <span class="tag">скаут</span>{% endif %}
+          {% if c.note %}<br><span class="muted">{{ c.note }}</span>{% endif %}</td>
+        <td>{{ c.auth }}<br><span class="muted">{{ c.secret_label }}</span></td>
+        <td>{{ c.allowed_roles | join(", ") }}</td>
+        <td>{{ c.denied_roles | join(", ") }}</td>
+        <td>{% if c.approval %}<span class="tag warn">нужно согласие</span>{% else %}<span class="tag ok">по политике</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+
+<div class="card">
+  <h2>Системы из реестра</h2>
   {% if systems %}
   <table>
     <thead><tr><th>Система</th><th>Состояние</th><th>Подключена (UTC)</th></tr></thead>
@@ -14,32 +112,23 @@
     {% endfor %}
     </tbody>
   </table>
-  {% else %}
-  <p class="muted">Реестр систем не настроен — подключать нечего.</p>
-  {% endif %}
-</div>
-{% if connectable %}
-<div class="card">
-  <h2>Подключить систему</h2>
+  {% else %}<p class="muted">Реестр систем не настроен — подключать нечего.</p>{% endif %}
+  {% if connectable %}
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <form method="post" action="/connections">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {% if connect_request_id %}
-    <input type="hidden" name="connect_request_id" value="{{ connect_request_id }}">
-    <p class="muted">Подключение начато в Telegram — осталось ввести доступ.</p>
-    {% endif %}
+    {% if connect_request_id %}<input type="hidden" name="connect_request_id" value="{{ connect_request_id }}">{% endif %}
     <label for="system">Система</label>
     <select id="system" name="system">
       {% for s in connectable %}<option value="{{ s }}" {% if s == selected %}selected{% endif %}>{{ s }}</option>{% endfor %}
     </select>
     <label for="secret">Доступ (токен)</label>
     <input type="password" id="secret" name="secret" autocomplete="off" required>
-    <p class="muted">Доступ уходит в зашифрованное хранилище харнесса; ни кабинет, ни бот его больше не покажут.
-      Подключение начнётся только после вашего подтверждения в «Предложениях».</p>
     <div class="actions"><button class="button" type="submit">Сохранить доступ и предложить подключение</button></div>
   </form>
+  {% endif %}
 </div>
-{% endif %}
+
 <div class="card">
   <h2>Карта ландшафта</h2>
   {% for system, item in landscape.items() %}
@@ -51,7 +140,6 @@
         {% for l in o.links or [] %}<br><span class="muted">связь: {{ l.field }} → {{ l.to }}</span>{% endfor %}</li>
     {% endfor %}
     </ul>
-    {% if item.discovered_at %}<p class="muted">Исследовано: {{ item.discovered_at[:16] | replace("T", " ") }} UTC</p>{% endif %}
   {% else %}
     <p class="muted">Карта появится, когда Исследователь пройдёт по подключённой системе.</p>
   {% endfor %}

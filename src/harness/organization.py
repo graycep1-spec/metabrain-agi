@@ -44,15 +44,30 @@ class OrgStore:
     def get(self, company_id: UUID) -> dict[str, Any]:
         with self._c.transaction():
             row = self._c.execute(
-                "SELECT industry, size, kpi FROM org_settings WHERE company_id = %s",
+                "SELECT industry, size, kpi, metabrain_enabled FROM org_settings WHERE company_id = %s",
                 (company_id,),
             ).fetchone()
-        industry, size, kpi = row if row else ("", "", "")
+        industry, size, kpi, metabrain_enabled = row if row else ("", "", "", True)
         return {
             "industry": industry, "industry_label": INDUSTRIES.get(industry, industry),
             "size": size, "size_label": SIZES.get(size, size),
-            "kpi": kpi,
+            "kpi": kpi, "metabrain_enabled": bool(metabrain_enabled),
         }
+
+    def set_metabrain(self, company_id: UUID, *, enabled: bool, updated_by: UUID | None) -> dict[str, Any]:
+        with self._c.transaction():
+            self._c.execute(
+                """
+                INSERT INTO org_settings (company_id, metabrain_enabled, updated_at, updated_by)
+                VALUES (%s, %s, now(), %s)
+                ON CONFLICT (company_id) DO UPDATE SET
+                    metabrain_enabled = EXCLUDED.metabrain_enabled,
+                    updated_at = EXCLUDED.updated_at,
+                    updated_by = EXCLUDED.updated_by
+                """,
+                (company_id, bool(enabled), updated_by),
+            )
+        return self.get(company_id)
 
     def put(self, company_id: UUID, *, industry: Any, size: Any, kpi: Any,
             updated_by: UUID | None) -> dict[str, Any]:

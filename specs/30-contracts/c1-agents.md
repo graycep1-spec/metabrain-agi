@@ -35,6 +35,13 @@ task.update {task_id, status?, title?, description?, due_at?} -> 200 task
 planning.summary {} -> {processes, projects, assignments, tasks}
 planning.seed_examples {} -> {processes, projects, assignments, tasks}  # идемпотентно
 
+settings.llm.usage {} -> {currency, installation: {limit_usd, spent_usd, remaining_usd, prompt_tokens, completion_tokens, total_tokens}, today: {...}}
+settings.metabrain.get {} -> {enabled}
+settings.metabrain.put {enabled} -> {enabled}
+connections.catalog {} -> {groups[]}                    # группы, вход, allowed_roles/denied_roles
+connections.custom.list {} -> {connections[]}           # без секрета, secret_masked
+connections.custom.create {name, kind, target, auth_type, secret?, allowed_roles?, note?} -> 201 connection
+
 employee.draft {harness_id, kind: "twin" | "new", role_text}
     -> {employee_id, passport_draft, proposal_id}            # паспорт (C-6) — предложение вида passport
 employee.list {harness_id}

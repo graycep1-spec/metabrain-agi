@@ -25,17 +25,58 @@ class FakeC1API:
         return self.responses.get(operation, {})
 
 
-def test_start_registers_telegram_identity_with_optional_invite():
+def unregistered() -> "FakeC1API":
+    """Новый человек: любая операция харнесса отвечает registration_required."""
     api = FakeC1API()
+    api.errors["employee.list"] = C1APIError(status_code=401, code="registration_required")
+    return api
+
+
+def test_start_registers_telegram_identity_with_optional_invite():
+    api = unregistered()
     adapter = TelegramAdapter(api)
 
     reply = asyncio.run(adapter.handle_message(telegram_user_id=42, text="/start invite-abc"))
 
-    assert not api.calls
+    assert [op for op, _ in api.calls] == ["employee.list"]   # только проверка регистрации
     assert "согласие" in reply.text.lower()
     assert any(
         button.callback_data == "register:invite-abc" for button in reply.buttons
     )
+
+
+def test_start_for_an_already_registered_person_does_not_offer_registration_again():
+    """Повторный /start раньше вёл к person.register → already_registered → «Попробуйте позже»."""
+    api = FakeC1API()                      # employee.list отвечает успехом — личность известна
+    adapter = TelegramAdapter(api)
+
+    reply = asyncio.run(adapter.handle_message(telegram_user_id=42, text="/start"))
+
+    assert not reply.buttons
+    assert "уже зарегистрированы" in reply.text
+    assert "/role" in reply.text
+    assert "person.register" not in [op for op, _ in api.calls]
+
+
+def test_start_with_an_invite_when_already_in_an_organisation_explains_instead_of_failing():
+    api = FakeC1API()
+    adapter = TelegramAdapter(api)
+
+    reply = asyncio.run(adapter.handle_message(telegram_user_id=42, text="/start some-invite-code"))
+
+    assert "уже состоите в организации" in reply.text
+    assert not reply.buttons
+
+
+def test_already_registered_error_is_explained_in_russian():
+    api = FakeC1API()
+    api.errors["person.register"] = C1APIError(status_code=409, code="already_registered")
+    adapter = TelegramAdapter(api)
+
+    reply = asyncio.run(adapter.handle_callback(telegram_user_id=42, callback_data="register:-"))
+
+    assert "уже зарегистрированы" in reply.text
+    assert "Попробуйте позже" not in reply.text
 
 
 def test_registration_is_created_only_after_explicit_external_llm_consent():
